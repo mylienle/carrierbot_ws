@@ -29,7 +29,7 @@ controller_server:
       desired_linear_vel: 1.0
       max_linear_accel: 1.0
       max_linear_decel: 1.5
-      lookahead_dist: 0.8
+      lookahead_dist: 1.2
       min_lookahead_dist: 0.25
       max_lookahead_dist: 1.5
       lookahead_time: 1.5
@@ -45,7 +45,7 @@ controller_server:
       regulated_linear_scaling_min_speed: 0.25
       use_rotate_to_heading: true
       rotate_to_heading_min_angle: 1.2
-      curvature_lookahead_dist: 0.25
+      curvature_lookahead_dist: 0.5
       max_angular_accel: 3.2
       goal_dist_tol: 0.5
       cost_scaling_dist: 0.3
