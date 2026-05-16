@@ -171,6 +171,13 @@ def generate_launch_description():
         condition=IfCondition(use_amcl)
     )
 
+    mqtt_subscriber = Node(
+        package="carrierbot_mqtt",
+        executable="goal_subscriber",
+        name="mqtt_goal_subscriber",
+        output="screen",
+    )
+
     rviz = Node(
         package="rviz2",
         executable="rviz2",
@@ -203,7 +210,7 @@ def generate_launch_description():
         imu,
         robot_localization,
         datalogger,
-
+        TimerAction(period=14.0, actions=[mqtt_subscriber]),
         TimerAction(period=2.0, actions=[controller]),
         TimerAction(period=4.0, actions=[slam]),
         TimerAction(period=12.0, actions=[navigation]),
