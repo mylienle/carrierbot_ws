@@ -17,8 +17,9 @@ MQTT_TOPIC = "robot2/goal"
 # --- Goal coordinates mapping ---
 GOAL_COORDINATES = {
     "DestinationPoint1": {"x": 5.6745, "y": 3.7549, "z": 0.0, "qx": 0.0, "qy": 0.0, "qz": -0.01, "qw": 1.0},
-    "DestinationPoint2": {"x": 1.0, "y": 2.0, "z": 0.0, "qx": 0.0, "qy": 0.0, "qz": 0.5, "qw": 1.5},
-    "DestinationPoint3": {"x": 3.0, "y": 4.0, "z": 0.0, "qx": 0.0, "qy": 0.0, "qz": 0.0, "qw": 1.0},
+    "DestinationPoint2": {"x": -9.502463883942948, "y": 3.604801781709745, "z": 0.0, "qx": 0.0, "qy": 0.0, "qz": 1.0, "qw": 0.0},
+    "DestinationPoint3": {"x": 1.4895777244658523, "y": 1.1899790896165576, "z": 0.0, "qx": 0.0, "qy": 0.0, "qz": 1.0, "qw": 0.0},
+    "DestinationPoint4": {"x": 0.0, "y": 0.0, "z": 0.0, "qx": 0.0, "qy": 0.0, "qz": 1.0, "qw": 0.0},
     # Add more goals here
 }
 
