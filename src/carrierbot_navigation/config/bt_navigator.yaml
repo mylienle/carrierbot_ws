@@ -11,7 +11,7 @@ bt_navigator:
     bt_loop_duration: 10
     wait_for_service_timeout: 1000
 
-    default_bt_xml_filename: "/opt/ros/foxy/share/nav2_bt_navigator/behavior_trees/navigate_w_replanning_and_recovery.xml"
+    default_bt_xml_filename: "src/carrierbot_navigation/config/navigate_w_replanning_no_spin.xml"
 
     plugin_lib_names:
       - nav2_compute_path_to_pose_action_bt_node

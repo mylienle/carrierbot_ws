@@ -11,6 +11,7 @@ setup(
             ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
         ('share/' + package_name + '/launch', ['launch/goal_subscriber.launch.py']),
+        ('share/' + package_name + '/launch', ['launch/reach_goal.launch.py']),
     ],
     install_requires=['setuptools', 'paho-mqtt'],
     zip_safe=True,
@@ -22,6 +23,7 @@ setup(
     entry_points={
         'console_scripts': [
             'goal_subscriber = carrierbot_mqtt.goal_subscriber:main',
+            'reach_goal = carrierbot_mqtt.reach_goal:main',
         ],
     },
 )

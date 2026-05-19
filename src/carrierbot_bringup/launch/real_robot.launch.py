@@ -178,6 +178,13 @@ def generate_launch_description():
         output="screen",
     )
 
+    mqtt_publisher = Node(
+        package="carrierbot_mqtt",
+        executable="reach_goal",
+        name="reach_goal",
+        output="screen",
+    )
+
     rviz = Node(
         package="rviz2",
         executable="rviz2",
@@ -210,9 +217,10 @@ def generate_launch_description():
         imu,
         robot_localization,
         datalogger,
-        TimerAction(period=14.0, actions=[mqtt_subscriber]),
         TimerAction(period=2.0, actions=[controller]),
         TimerAction(period=4.0, actions=[slam]),
         TimerAction(period=12.0, actions=[navigation]),
         TimerAction(period=14.0, actions=[rviz]),
+        TimerAction(period=14.0, actions=[mqtt_subscriber]),
+        TimerAction(period=14.0, actions=[mqtt_publisher]),
     ])
