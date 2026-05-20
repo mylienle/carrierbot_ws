@@ -67,10 +67,10 @@ class DataLogger(Node):
                 'amcl_qw',
                 'filtered_vx',
                 'filtered_wz',
-                'left_velocity (rps)',
-                'right_velocity (rps)',
-                'left_rps',
-                'right_rps',
+                'left_velocity_cmd',
+                'right_velocity_cmd',
+                'left_velocity_encoder',
+                'right_velocity_encoder',
                 'voltage',
             ])
             self.csv_file.flush()
