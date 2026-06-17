@@ -29,8 +29,8 @@ def generate_launch_description():
     map_path = PathJoinSubstitution([
         get_package_share_directory("carrierbot_bringup"),
         "maps",
-        "carrierbot_slam.yaml"
-        # "lab_map.yaml"
+        # "carrierbot_slam.yaml"
+        "lab_map.yaml"
     ])
     
     nav2_map_server = Node(
