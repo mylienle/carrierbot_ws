@@ -64,9 +64,8 @@ karto::OccupancyGrid * SMapper::getOccupancyGrid(const double & resolution)
 /*****************************************************************************/
 {
   karto::OccupancyGrid * occ_grid = nullptr;
-  return karto::OccupancyGrid::CreateFromScans(
-    mapper_->GetAllProcessedScans(),
-    resolution, (kt_int32u)mapper_->getParamMinPassThrough(), (kt_double)mapper_->getParamOccupancyThreshold());
+  return karto::OccupancyGrid::CreateFromScans(mapper_->GetAllProcessedScans(),
+           resolution);
 }
 
 /*****************************************************************************/
@@ -129,25 +128,14 @@ void SMapper::configure(const rclcpp::Node::SharedPtr & node)
     node->declare_parameter("scan_buffer_size", scan_buffer_size);
   }
   node->get_parameter("scan_buffer_size", scan_buffer_size);
-  if (scan_buffer_size <= 0) {
-    RCLCPP_WARN(node->get_logger(),
-      "You've set scan_buffer_size to be a value smaller than zero,"
-      "this isn't allowed so it will be set to default value 10.");
-    scan_buffer_size = 10;
-  }
   mapper_->setParamScanBufferSize(scan_buffer_size);
+
 
   double scan_buffer_maximum_scan_distance = 10;
   if (!node->has_parameter("scan_buffer_maximum_scan_distance")) {
     node->declare_parameter("scan_buffer_maximum_scan_distance", scan_buffer_maximum_scan_distance);
   }
   node->get_parameter("scan_buffer_maximum_scan_distance", scan_buffer_maximum_scan_distance);
-  if (math::Square(scan_buffer_maximum_scan_distance) <= 1e-06) {
-    RCLCPP_WARN(node->get_logger(),
-      "You've set scan_buffer_maximum_scan_distance to be a value whose square is smaller than 1e-06,"
-      "this isn't allowed so it will be set to default value 10.");
-    scan_buffer_maximum_scan_distance = 10;
-  }
   mapper_->setParamScanBufferMaximumScanDistance(scan_buffer_maximum_scan_distance);
 
   double link_match_minimum_response_fine = 0.1;
@@ -187,18 +175,14 @@ void SMapper::configure(const rclcpp::Node::SharedPtr & node)
 
   double loop_match_maximum_variance_coarse = 3.0;
   if (!node->has_parameter("loop_match_maximum_variance_coarse")) {
-    node->declare_parameter(
-      "loop_match_maximum_variance_coarse",
-      loop_match_maximum_variance_coarse);
+    node->declare_parameter("loop_match_maximum_variance_coarse", loop_match_maximum_variance_coarse);
   }
   node->get_parameter("loop_match_maximum_variance_coarse", loop_match_maximum_variance_coarse);
   mapper_->setParamLoopMatchMaximumVarianceCoarse(loop_match_maximum_variance_coarse);
 
   double loop_match_minimum_response_coarse = 0.35;
   if (!node->has_parameter("loop_match_minimum_response_coarse")) {
-    node->declare_parameter(
-      "loop_match_minimum_response_coarse",
-      loop_match_minimum_response_coarse);
+    node->declare_parameter("loop_match_minimum_response_coarse", loop_match_minimum_response_coarse);
   }
   node->get_parameter("loop_match_minimum_response_coarse", loop_match_minimum_response_coarse);
   mapper_->setParamLoopMatchMinimumResponseCoarse(loop_match_minimum_response_coarse);
@@ -213,49 +197,24 @@ void SMapper::configure(const rclcpp::Node::SharedPtr & node)
   // Setting Correlation Parameters
   double correlation_search_space_dimension = 0.5;
   if (!node->has_parameter("correlation_search_space_dimension")) {
-    node->declare_parameter(
-      "correlation_search_space_dimension",
-      correlation_search_space_dimension);
+    node->declare_parameter("correlation_search_space_dimension", correlation_search_space_dimension);
   }
   node->get_parameter("correlation_search_space_dimension", correlation_search_space_dimension);
-  if (correlation_search_space_dimension <= 0) {
-    RCLCPP_WARN(node->get_logger(),
-      "You've set correlation_search_space_dimension to be negative,"
-      "this isn't allowed so it will be set to default value 0.5.");
-    correlation_search_space_dimension = 0.5;
-  }
   mapper_->setParamCorrelationSearchSpaceDimension(correlation_search_space_dimension);
 
   double correlation_search_space_resolution = 0.01;
   if (!node->has_parameter("correlation_search_space_resolution")) {
-    node->declare_parameter(
-      "correlation_search_space_resolution",
-      correlation_search_space_resolution);
+    node->declare_parameter("correlation_search_space_resolution", correlation_search_space_resolution);
   }
   node->get_parameter("correlation_search_space_resolution", correlation_search_space_resolution);
-  if (correlation_search_space_resolution <= 0) {
-    RCLCPP_WARN(node->get_logger(),
-      "You've set correlation_search_space_resolution to be negative,"
-      "this isn't allowed so it will be set to default value 0.01.");
-    correlation_search_space_resolution = 0.01;
-  }
   mapper_->setParamCorrelationSearchSpaceResolution(correlation_search_space_resolution);
 
   double correlation_search_space_smear_deviation = 0.1;
   if (!node->has_parameter("correlation_search_space_smear_deviation")) {
-    node->declare_parameter(
-      "correlation_search_space_smear_deviation",
-      correlation_search_space_smear_deviation);
-  }
-  node->get_parameter(
-    "correlation_search_space_smear_deviation",
+    node->declare_parameter("correlation_search_space_smear_deviation",
     correlation_search_space_smear_deviation);
-  if (correlation_search_space_smear_deviation <= 0) {
-    RCLCPP_WARN(node->get_logger(),
-      "You've set correlation_search_space_smear_deviation to be negative,"
-      "this isn't allowed so it will be set to default value 0.1.");
-    correlation_search_space_smear_deviation = 0.1;
   }
+  node->get_parameter("correlation_search_space_smear_deviation", correlation_search_space_smear_deviation);
   mapper_->setParamCorrelationSearchSpaceSmearDeviation(correlation_search_space_smear_deviation);
 
   // Setting Correlation Parameters, Loop Closure Parameters
@@ -264,12 +223,6 @@ void SMapper::configure(const rclcpp::Node::SharedPtr & node)
     node->declare_parameter("loop_search_space_dimension", loop_search_space_dimension);
   }
   node->get_parameter("loop_search_space_dimension", loop_search_space_dimension);
-  if (loop_search_space_dimension <= 0) {
-    RCLCPP_WARN(node->get_logger(),
-      "You've set loop_search_space_dimension to be negative,"
-      "this isn't allowed so it will be set to default value 8.0.");
-    loop_search_space_dimension = 8.0;
-  }
   mapper_->setParamLoopSearchSpaceDimension(loop_search_space_dimension);
 
   double loop_search_space_resolution = 0.05;
@@ -277,12 +230,6 @@ void SMapper::configure(const rclcpp::Node::SharedPtr & node)
     node->declare_parameter("loop_search_space_resolution", loop_search_space_resolution);
   }
   node->get_parameter("loop_search_space_resolution", loop_search_space_resolution);
-  if (loop_search_space_resolution <= 0) {
-    RCLCPP_WARN(node->get_logger(),
-      "You've set loop_search_space_resolution to be negative,"
-      "this isn't allowed so it will be set to default value 0.05.");
-    loop_search_space_resolution = 0.05;
-  }
   mapper_->setParamLoopSearchSpaceResolution(loop_search_space_resolution);
 
   double loop_search_space_smear_deviation = 0.03;
@@ -290,12 +237,6 @@ void SMapper::configure(const rclcpp::Node::SharedPtr & node)
     node->declare_parameter("loop_search_space_smear_deviation", loop_search_space_smear_deviation);
   }
   node->get_parameter("loop_search_space_smear_deviation", loop_search_space_smear_deviation);
-  if (loop_search_space_smear_deviation <= 0) {
-    RCLCPP_WARN(node->get_logger(),
-      "You've set loop_search_space_smear_deviation to be negative,"
-      "this isn't allowed so it will be set to default value 0.03.");
-    loop_search_space_smear_deviation = 0.03;
-  }
   mapper_->setParamLoopSearchSpaceSmearDeviation(loop_search_space_smear_deviation);
 
   // Setting Scan Matcher Parameters
@@ -354,21 +295,6 @@ void SMapper::configure(const rclcpp::Node::SharedPtr & node)
   }
   node->get_parameter("use_response_expansion", use_response_expansion);
   mapper_->setParamUseResponseExpansion(use_response_expansion);
-
-
-  int min_pass_through = 2;
-  if (!node->has_parameter("min_pass_through")) {
-    node->declare_parameter("min_pass_through", min_pass_through);
-  }
-  node->get_parameter("min_pass_through", min_pass_through);
-  mapper_->setParamMinPassThrough(min_pass_through);
-
-  double occupancy_threshold = 0.1;
-  if (!node->has_parameter("occupancy_threshold")) {
-    node->declare_parameter("occupancy_threshold", occupancy_threshold);
-  }
-  node->get_parameter("occupancy_threshold", occupancy_threshold);
-  mapper_->setParamOccupancyThreshold(occupancy_threshold);
 }
 
 /*****************************************************************************/

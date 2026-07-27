@@ -30,11 +30,11 @@ class LocalizationSlamToolbox : public SlamToolbox
 {
 public:
   explicit LocalizationSlamToolbox(rclcpp::NodeOptions options);
-  virtual ~LocalizationSlamToolbox() {}
+  ~LocalizationSlamToolbox() {}
   virtual void loadPoseGraphByParams();
 
 protected:
-  virtual void laserCallback(
+  void laserCallback(
     sensor_msgs::msg::LaserScan::ConstSharedPtr scan) override;
   void localizePoseCallback(
     const geometry_msgs::msg::PoseWithCovarianceStamped::SharedPtr msg);
@@ -43,16 +43,16 @@ protected:
     const std::shared_ptr<std_srvs::srv::Empty::Request> req,
     std::shared_ptr<std_srvs::srv::Empty::Response> resp);
 
-  virtual bool serializePoseGraphCallback(
+  bool serializePoseGraphCallback(
     const std::shared_ptr<rmw_request_id_t> request_header,
     const std::shared_ptr<slam_toolbox::srv::SerializePoseGraph::Request> req,
     std::shared_ptr<slam_toolbox::srv::SerializePoseGraph::Response> resp) override;
-  virtual bool deserializePoseGraphCallback(
+  bool deserializePoseGraphCallback(
     const std::shared_ptr<rmw_request_id_t> request_header,
     const std::shared_ptr<slam_toolbox::srv::DeserializePoseGraph::Request> req,
     std::shared_ptr<slam_toolbox::srv::DeserializePoseGraph::Response> resp) override;
 
-  virtual LocalizedRangeScan * addScan(
+  LocalizedRangeScan * addScan(
     LaserRangeFinder * laser,
     const sensor_msgs::msg::LaserScan::ConstSharedPtr & scan,
     Pose2 & pose) override;

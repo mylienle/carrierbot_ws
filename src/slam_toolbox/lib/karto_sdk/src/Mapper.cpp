@@ -770,7 +770,7 @@ kt_double ScanMatcher::CorrelateScan(
   m_nAngles = nAngles;
   m_searchAngleResolution = searchAngleResolution;
   m_doPenalize = doPenalize;
-  tbb::parallel_for_each(m_yPoses, (*this));
+  tbb::parallel_do(m_yPoses, (*this) );
 
   // find value of best response (in [0; 1])
   kt_double bestResponse = -1;
@@ -1473,7 +1473,7 @@ void MapperGraph::AddEdges(LocalizedRangeScan * pScan, const Matrix3 & rCovarian
         pScan,
         pSensorManager->GetScans(rCandidateSensorName),
         bestPose, covariance);
-      LinkScans(pSensorManager->GetScan(rCandidateSensorName, 0), pScan, bestPose, covariance);
+      LinkScans(pScan, pSensorManager->GetScan(rCandidateSensorName, 0), bestPose, covariance);
 
       // only add to means and covariances if response was high "enough"
       if (response > m_pMapper->m_pLinkMatchMinimumResponseFine->GetValue()) {
@@ -2285,24 +2285,12 @@ void Mapper::InitializeParameters()
     "Minimum value of the distance penalty multiplier so scores do not "
     "become too small.",
     0.5, GetParameterManager());
-  
+
   m_pUseResponseExpansion = new Parameter<kt_bool>(
     "UseResponseExpansion",
     "Whether to increase the search space if no good matches are initially "
     "found.",
     false, GetParameterManager());
-
-  m_pMinPassThrough = new Parameter<kt_int32u>(
-    "MinPassThrough",
-    "Number of beams that must pass through a cell before it will be considered to be occupied "
-    "or unoccupied.  This prevents stray beams from messing up the map. "
-    "found.",
-    2, GetParameterManager());
-  
-  m_pOccupancyThreshold = new Parameter<kt_double>(
-    "OccupancyThreshold",
-    "Minimum ratio of beams hitting cell to beams passing through cell to be marked as occupied",
-    0.1, GetParameterManager());
 }
 /* Adding in getters and setters here for easy parameter access */
 
@@ -2459,16 +2447,6 @@ bool Mapper::getParamUseResponseExpansion()
   return static_cast<bool>(m_pUseResponseExpansion->GetValue());
 }
 
-int Mapper::getParamMinPassThrough()
-{
-  return static_cast<int>(m_pMinPassThrough->GetValue());
-}
-
-double Mapper::getParamOccupancyThreshold()
-{
-  return static_cast<double>(m_pOccupancyThreshold->GetValue());
-}
-
 /* Setters for parameters */
 // General Parameters
 void Mapper::setParamUseScanMatching(bool b)
@@ -2621,16 +2599,6 @@ void Mapper::setParamUseResponseExpansion(bool b)
   m_pUseResponseExpansion->SetValue((kt_bool)b);
 }
 
-void Mapper::setParamMinPassThrough(int i)
-{
-  m_pMinPassThrough->SetValue((kt_int32u)i);
-}
-
-void Mapper::setParamOccupancyThreshold(double d)
-{
-  m_pOccupancyThreshold->SetValue((kt_double)d);
-}
-
 
 void Mapper::Initialize(kt_double rangeThreshold)
 {
@@ -2708,7 +2676,7 @@ kt_bool Mapper::Process(Object *  /*pObject*/)  // NOLINT
   return true;
 }
 
-kt_bool Mapper::Process(LocalizedRangeScan * pScan, Matrix3 * covariance)
+kt_bool Mapper::Process(LocalizedRangeScan * pScan)
 {
   if (pScan != NULL) {
     karto::LaserRangeFinder * pLaserRangeFinder = pScan->GetLaserRangeFinder();
@@ -2737,8 +2705,8 @@ kt_bool Mapper::Process(LocalizedRangeScan * pScan, Matrix3 * covariance)
       return false;
     }
 
-    Matrix3 cov;
-    cov.SetToIdentity();
+    Matrix3 covariance;
+    covariance.SetToIdentity();
 
     // correct scan (if not first scan)
     if (m_pUseScanMatching->GetValue() && pLastScan != NULL) {
@@ -2746,11 +2714,8 @@ kt_bool Mapper::Process(LocalizedRangeScan * pScan, Matrix3 * covariance)
       m_pSequentialScanMatcher->MatchScan(pScan,
         m_pMapperSensorManager->GetRunningScans(pScan->GetSensorName()),
         bestPose,
-        cov);
+        covariance);
       pScan->SetSensorPose(bestPose);
-      if (covariance) {
-        *covariance = cov;
-      }
     }
 
     // add scan to buffer and assign id
@@ -2759,7 +2724,7 @@ kt_bool Mapper::Process(LocalizedRangeScan * pScan, Matrix3 * covariance)
     if (m_pUseScanMatching->GetValue()) {
       // add to graph
       m_pGraph->AddVertex(pScan);
-      m_pGraph->AddEdges(pScan, cov);
+      m_pGraph->AddEdges(pScan, covariance);
 
       m_pMapperSensorManager->AddRunningScan(pScan);
 
@@ -2780,7 +2745,7 @@ kt_bool Mapper::Process(LocalizedRangeScan * pScan, Matrix3 * covariance)
   return false;
 }
 
-kt_bool Mapper::ProcessAgainstNodesNearBy(LocalizedRangeScan * pScan, kt_bool addScanToLocalizationBuffer, Matrix3 * covariance)
+kt_bool Mapper::ProcessAgainstNodesNearBy(LocalizedRangeScan * pScan, kt_bool addScanToLocalizationBuffer)
 {
   if (pScan != NULL) {
     karto::LaserRangeFinder * pLaserRangeFinder = pScan->GetLaserRangeFinder();
@@ -2808,8 +2773,8 @@ kt_bool Mapper::ProcessAgainstNodesNearBy(LocalizedRangeScan * pScan, kt_bool ad
       m_pMapperSensorManager->SetLastScan(pLastScan);
     }
 
-    Matrix3 cov;
-    cov.SetToIdentity();
+    Matrix3 covariance;
+    covariance.SetToIdentity();
 
     // correct scan (if not first scan)
     if (m_pUseScanMatching->GetValue() && pLastScan != NULL) {
@@ -2817,15 +2782,11 @@ kt_bool Mapper::ProcessAgainstNodesNearBy(LocalizedRangeScan * pScan, kt_bool ad
       m_pSequentialScanMatcher->MatchScan(pScan,
         m_pMapperSensorManager->GetRunningScans(pScan->GetSensorName()),
         bestPose,
-        cov);
+        covariance);
       pScan->SetSensorPose(bestPose);
     }
 
     pScan->SetOdometricPose(pScan->GetCorrectedPose());
-
-    if (covariance) {
-      *covariance = cov;
-    }
 
     // add scan to buffer and assign id
     m_pMapperSensorManager->AddScan(pScan);
@@ -2834,7 +2795,7 @@ kt_bool Mapper::ProcessAgainstNodesNearBy(LocalizedRangeScan * pScan, kt_bool ad
     if (m_pUseScanMatching->GetValue()) {
       // add to graph
       scan_vertex = m_pGraph->AddVertex(pScan);
-      m_pGraph->AddEdges(pScan, cov);
+      m_pGraph->AddEdges(pScan, covariance);
 
       m_pMapperSensorManager->AddRunningScan(pScan);
 
@@ -2860,7 +2821,7 @@ kt_bool Mapper::ProcessAgainstNodesNearBy(LocalizedRangeScan * pScan, kt_bool ad
   return false;
 }
 
-kt_bool Mapper::ProcessLocalization(LocalizedRangeScan * pScan, Matrix3 * covariance)
+kt_bool Mapper::ProcessLocalization(LocalizedRangeScan * pScan)
 {
   if (pScan == NULL) {
     return false;
@@ -2898,8 +2859,8 @@ kt_bool Mapper::ProcessLocalization(LocalizedRangeScan * pScan, Matrix3 * covari
     return false;
   }
 
-  Matrix3 cov;
-  cov.SetToIdentity();
+  Matrix3 covariance;
+  covariance.SetToIdentity();
 
   // correct scan (if not first scan)
   if (m_pUseScanMatching->GetValue() && pLastScan != NULL) {
@@ -2907,11 +2868,8 @@ kt_bool Mapper::ProcessLocalization(LocalizedRangeScan * pScan, Matrix3 * covari
     m_pSequentialScanMatcher->MatchScan(pScan,
       m_pMapperSensorManager->GetRunningScans(pScan->GetSensorName()),
       bestPose,
-      cov);
+      covariance);
     pScan->SetSensorPose(bestPose);
-    if (covariance) {
-      *covariance = cov;
-    }
   }
 
   // add scan to buffer and assign id
@@ -2921,7 +2879,7 @@ kt_bool Mapper::ProcessLocalization(LocalizedRangeScan * pScan, Matrix3 * covari
   if (m_pUseScanMatching->GetValue()) {
     // add to graph
     scan_vertex = m_pGraph->AddVertex(pScan);
-    m_pGraph->AddEdges(pScan, cov);
+    m_pGraph->AddEdges(pScan, covariance);
 
     m_pMapperSensorManager->AddRunningScan(pScan);
 
@@ -3054,8 +3012,7 @@ kt_bool Mapper::RemoveNodeFromGraph(Vertex<LocalizedRangeScan> * vertex_to_remov
 
 kt_bool Mapper::ProcessAgainstNode(
   LocalizedRangeScan * pScan,
-  const int & nodeId,
-  Matrix3 * covariance)
+  const int & nodeId)
 {
   if (pScan != NULL) {
     karto::LaserRangeFinder * pLaserRangeFinder = pScan->GetLaserRangeFinder();
@@ -3081,8 +3038,8 @@ kt_bool Mapper::ProcessAgainstNode(
     m_pMapperSensorManager->AddRunningScan(pLastScan);
     m_pMapperSensorManager->SetLastScan(pLastScan);
 
-    Matrix3 cov;
-    cov.SetToIdentity();
+    Matrix3 covariance;
+    covariance.SetToIdentity();
 
     // correct scan (if not first scan)
     if (m_pUseScanMatching->GetValue() && pLastScan != NULL) {
@@ -3090,14 +3047,11 @@ kt_bool Mapper::ProcessAgainstNode(
       m_pSequentialScanMatcher->MatchScan(pScan,
         m_pMapperSensorManager->GetRunningScans(pScan->GetSensorName()),
         bestPose,
-        cov);
+        covariance);
       pScan->SetSensorPose(bestPose);
     }
 
     pScan->SetOdometricPose(pScan->GetCorrectedPose());
-    if (covariance) {
-      *covariance = cov;
-    }
 
     // add scan to buffer and assign id
     m_pMapperSensorManager->AddScan(pScan);
@@ -3105,7 +3059,7 @@ kt_bool Mapper::ProcessAgainstNode(
     if (m_pUseScanMatching->GetValue()) {
       // add to graph
       m_pGraph->AddVertex(pScan);
-      m_pGraph->AddEdges(pScan, cov);
+      m_pGraph->AddEdges(pScan, covariance);
 
       m_pMapperSensorManager->AddRunningScan(pScan);
 
@@ -3127,10 +3081,10 @@ kt_bool Mapper::ProcessAgainstNode(
   return false;
 }
 
-kt_bool Mapper::ProcessAtDock(LocalizedRangeScan * pScan, Matrix3 * covariance)
+kt_bool Mapper::ProcessAtDock(LocalizedRangeScan * pScan)
 {
   // Special case of processing against node where node is the starting point
-  return ProcessAgainstNode(pScan, 0, covariance);
+  return ProcessAgainstNode(pScan, 0);
 }
 
 /**

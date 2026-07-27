@@ -12,35 +12,49 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#ifndef NAV2_BEHAVIOR_TREE__SPIN_ACTION_HPP_
+#define NAV2_BEHAVIOR_TREE__SPIN_ACTION_HPP_
+
 #include <string>
 #include <memory>
+#include <cmath>
 
-#include "nav2_behavior_tree/plugins/action/spin_action.hpp"
+#include "nav2_behavior_tree/bt_action_node.hpp"
+#include "nav2_msgs/action/spin.hpp"
+#include "geometry_msgs/msg/quaternion.hpp"
+#include "tf2/LinearMath/Quaternion.h"
+#include "tf2_geometry_msgs/tf2_geometry_msgs.h"
 
 namespace nav2_behavior_tree
 {
 
-SpinAction::SpinAction(
-  const std::string & xml_tag_name,
-  const std::string & action_name,
-  const BT::NodeConfiguration & conf)
-: BtActionNode<nav2_msgs::action::Spin>(xml_tag_name, action_name, conf)
+class SpinAction : public BtActionNode<nav2_msgs::action::Spin>
 {
-  double dist;
-  getInput("spin_dist", dist);
-  double time_allowance;
-  getInput("time_allowance", time_allowance);
-  goal_.target_yaw = dist;
-  goal_.time_allowance = rclcpp::Duration::from_seconds(time_allowance);
-  getInput("is_recovery", is_recovery_);
-}
+public:
+  SpinAction(
+    const std::string & xml_tag_name,
+    const std::string & action_name,
+    const BT::NodeConfiguration & conf)
+  : BtActionNode<nav2_msgs::action::Spin>(xml_tag_name, action_name, conf)
+  {
+    double dist;
+    getInput("spin_dist", dist);
+    goal_.target_yaw = dist;
+  }
 
-void SpinAction::on_tick()
-{
-  if (is_recovery_) {
+  void on_tick() override
+  {
     increment_recovery_count();
   }
-}
+
+  static BT::PortsList providedPorts()
+  {
+    return providedBasicPorts(
+      {
+        BT::InputPort<double>("spin_dist", 1.57, "Spin distance")
+      });
+  }
+};
 
 }  // namespace nav2_behavior_tree
 
@@ -55,3 +69,5 @@ BT_REGISTER_NODES(factory)
 
   factory.registerBuilder<nav2_behavior_tree::SpinAction>("Spin", builder);
 }
+
+#endif  // NAV2_BEHAVIOR_TREE__SPIN_ACTION_HPP_

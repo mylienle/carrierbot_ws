@@ -83,8 +83,8 @@ void LifelongSlamToolbox::laserCallback(
   sensor_msgs::msg::LaserScan::ConstSharedPtr scan)
 /*****************************************************************************/
 {
-  // store scan header
-  scan_header = scan->header;
+  // store scan timestamped
+  scan_timestamped = scan->header.stamp;
   // no odom info
   Pose2 pose;
   if (!pose_helper_->getOdomPose(pose, scan->header.stamp)) {
@@ -443,10 +443,3 @@ double LifelongSlamToolbox::computeReadingOverlapRatio(
 }
 
 }  // namespace slam_toolbox
-
-#include "rclcpp_components/register_node_macro.hpp"
-
-// Register the component with class_loader.
-// This acts as a sort of entry point, allowing the component to be discoverable when its library
-// is being loaded into a running process.
-RCLCPP_COMPONENTS_REGISTER_NODE(slam_toolbox::LifelongSlamToolbox)

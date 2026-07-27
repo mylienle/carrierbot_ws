@@ -33,22 +33,13 @@ GoalUpdater::GoalUpdater(
   const BT::NodeConfiguration & conf)
 : BT::DecoratorNode(name, conf)
 {
-  node_ = config().blackboard->get<rclcpp::Node::SharedPtr>("node");
-  callback_group_ = node_->create_callback_group(
-    rclcpp::CallbackGroupType::MutuallyExclusive,
-    false);
-  callback_group_executor_.add_callback_group(callback_group_, node_->get_node_base_interface());
+  auto node = config().blackboard->get<rclcpp::Node::SharedPtr>("node");
 
   std::string goal_updater_topic;
-  node_->get_parameter_or<std::string>("goal_updater_topic", goal_updater_topic, "goal_update");
+  node->get_parameter_or<std::string>("goal_updater_topic", goal_updater_topic, "goal_update");
 
-  rclcpp::SubscriptionOptions sub_option;
-  sub_option.callback_group = callback_group_;
-  goal_sub_ = node_->create_subscription<geometry_msgs::msg::PoseStamped>(
-    goal_updater_topic,
-    rclcpp::SystemDefaultsQoS(),
-    std::bind(&GoalUpdater::callback_updated_goal, this, _1),
-    sub_option);
+  goal_sub_ = node->create_subscription<geometry_msgs::msg::PoseStamped>(
+    goal_updater_topic, 10, std::bind(&GoalUpdater::callback_updated_goal, this, _1));
 }
 
 inline BT::NodeStatus GoalUpdater::tick()
@@ -57,19 +48,8 @@ inline BT::NodeStatus GoalUpdater::tick()
 
   getInput("input_goal", goal);
 
-  callback_group_executor_.spin_some();
-
-  if (last_goal_received_.header.stamp != rclcpp::Time(0)) {
-    auto last_goal_received_time = rclcpp::Time(last_goal_received_.header.stamp);
-    auto goal_time = rclcpp::Time(goal.header.stamp);
-    if (last_goal_received_time > goal_time) {
-      goal = last_goal_received_;
-    } else {
-      RCLCPP_WARN(
-        node_->get_logger(), "The timestamp of the received goal (%f) is older than the "
-        "current goal (%f). Ignoring the received goal.",
-        last_goal_received_time.seconds(), goal_time.seconds());
-    }
+  if (rclcpp::Time(last_goal_received_.header.stamp) > rclcpp::Time(goal.header.stamp)) {
+    goal = last_goal_received_;
   }
 
   setOutput("output_goal", goal);

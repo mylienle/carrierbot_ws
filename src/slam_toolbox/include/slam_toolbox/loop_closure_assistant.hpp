@@ -26,7 +26,6 @@
 #include <map>
 
 #include "tf2_ros/transform_broadcaster.h"
-#include "tf2_geometry_msgs/tf2_geometry_msgs.hpp"
 #include "tf2/utils.h"
 #include "rclcpp/rclcpp.hpp"
 #include "interactive_markers/interactive_marker_server.hpp"
@@ -53,7 +52,6 @@ public:
   void processInteractiveFeedback(
     const visualization_msgs::msg::InteractiveMarkerFeedback::ConstSharedPtr feedback);
   void publishGraph();
-  void setMapper(karto::Mapper * mapper);
 
 private:
   bool manualLoopClosureCallback(

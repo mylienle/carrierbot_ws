@@ -30,38 +30,20 @@ ComputePathToPoseAction::ComputePathToPoseAction(
 
 void ComputePathToPoseAction::on_tick()
 {
-  getInput("goal", goal_.goal);
+  getInput("goal", goal_.pose);
   getInput("planner_id", goal_.planner_id);
-  if (getInput("start", goal_.start)) {
-    goal_.use_start = true;
-  }
 }
 
 BT::NodeStatus ComputePathToPoseAction::on_success()
 {
   setOutput("path", result_.result->path);
+
+  if (first_time_) {
+    first_time_ = false;
+  } else {
+    config().blackboard->set("path_updated", true);
+  }
   return BT::NodeStatus::SUCCESS;
-}
-
-BT::NodeStatus ComputePathToPoseAction::on_aborted()
-{
-  nav_msgs::msg::Path empty_path;
-  setOutput("path", empty_path);
-  return BT::NodeStatus::FAILURE;
-}
-
-BT::NodeStatus ComputePathToPoseAction::on_cancelled()
-{
-  nav_msgs::msg::Path empty_path;
-  setOutput("path", empty_path);
-  return BT::NodeStatus::SUCCESS;
-}
-
-void ComputePathToPoseAction::halt()
-{
-  nav_msgs::msg::Path empty_path;
-  setOutput("path", empty_path);
-  BtActionNode::halt();
 }
 
 }  // namespace nav2_behavior_tree

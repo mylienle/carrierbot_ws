@@ -78,9 +78,9 @@ SlamToolboxPlugin::SlamToolboxPlugin(QWidget * parent)
     "/slam_toolbox/pause_new_measurements");
   _load_submap_for_merging =
     ros_node_->create_client<slam_toolbox::srv::AddSubmap>(
-    "/slam_toolbox/add_submap");
+    "/map_merging/add_submap");
   _merge = ros_node_->create_client<slam_toolbox::srv::MergeMaps>(
-    "/slam_toolbox/merge_submaps");
+    "/map_merging/merge_submaps");
 
   _vbox = new QVBoxLayout();
   _hbox1 = new QHBoxLayout();

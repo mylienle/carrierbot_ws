@@ -35,7 +35,7 @@
 #include "tf2_ros/transform_listener.h"
 #include "tf2_ros/message_filter.h"
 #include "tf2/LinearMath/Matrix3x3.h"
-#include "tf2_geometry_msgs/tf2_geometry_msgs.hpp"
+#include "tf2_geometry_msgs/tf2_geometry_msgs.h"
 #include "tf2/utils.h"
 
 #include "../lib/karto_sdk/include/karto_sdk/Mapper.h"
@@ -102,8 +102,6 @@ private:
   std::vector<karto::LocalizedRangeScanVector> scans_vec_;
   std::map<int, tf2::Transform> submap_marker_transform_;
   double resolution_;
-  int min_pass_through_;
-  double occupancy_threshold_;
   int num_submaps_;
 };
 

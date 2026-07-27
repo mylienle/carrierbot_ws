@@ -118,8 +118,8 @@ void LocalizationSlamToolbox::laserCallback(
   sensor_msgs::msg::LaserScan::ConstSharedPtr scan)
 /*****************************************************************************/
 {
-  // store scan header
-  scan_header = scan->header;
+  // store scan timestamped
+  scan_timestamped = scan->header.stamp;
   // no odom info
   Pose2 pose;
   if (!pose_helper_->getOdomPose(pose, scan->header.stamp)) {
@@ -150,7 +150,7 @@ LocalizedRangeScan * LocalizationSlamToolbox::addScan(
 {
   boost::mutex::scoped_lock l(pose_mutex_);
 
-  if (processor_type_ == PROCESS_LOCALIZATION && process_near_pose_) {
+  if (PROCESS_LOCALIZATION && process_near_pose_) {
     processor_type_ = PROCESS_NEAR_REGION;
   }
 
@@ -160,10 +160,6 @@ LocalizedRangeScan * LocalizationSlamToolbox::addScan(
   // Add the localized range scan to the smapper
   boost::mutex::scoped_lock lock(smapper_mutex_);
   bool processed = false, update_reprocessing_transform = false;
-
-  Matrix3 covariance;
-  covariance.SetToIdentity();
-
   if (processor_type_ == PROCESS_NEAR_REGION) {
     if (!process_near_pose_) {
       RCLCPP_ERROR(get_logger(),
@@ -176,13 +172,13 @@ LocalizedRangeScan * LocalizationSlamToolbox::addScan(
     range_scan->SetOdometricPose(*process_near_pose_);
     range_scan->SetCorrectedPose(range_scan->GetOdometricPose());
     process_near_pose_.reset(nullptr);
-    processed = smapper_->getMapper()->ProcessAgainstNodesNearBy(range_scan, true, &covariance);
+    processed = smapper_->getMapper()->ProcessAgainstNodesNearBy(range_scan, true);
 
     // reset to localization mode
     update_reprocessing_transform = true;
     processor_type_ = PROCESS_LOCALIZATION;
   } else if (processor_type_ == PROCESS_LOCALIZATION) {
-    processed = smapper_->getMapper()->ProcessLocalization(range_scan, &covariance);
+    processed = smapper_->getMapper()->ProcessLocalization(range_scan);
     update_reprocessing_transform = false;
   } else {
     RCLCPP_FATAL(get_logger(), "LocalizationSlamToolbox: "
@@ -198,8 +194,6 @@ LocalizedRangeScan * LocalizationSlamToolbox::addScan(
     // compute our new transform
     setTransformFromPoses(range_scan->GetCorrectedPose(), odom_pose,
       scan->header.stamp, update_reprocessing_transform);
-
-    publishPose(range_scan->GetCorrectedPose(), covariance, scan->header.stamp);
   }
 
   return range_scan;
@@ -239,10 +233,3 @@ void LocalizationSlamToolbox::localizePoseCallback(
 }
 
 }  // namespace slam_toolbox
-
-#include "rclcpp_components/register_node_macro.hpp"
-
-// Register the component with class_loader.
-// This acts as a sort of entry point, allowing the component to be discoverable when its library
-// is being loaded into a running process.
-RCLCPP_COMPONENTS_REGISTER_NODE(slam_toolbox::LocalizationSlamToolbox)

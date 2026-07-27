@@ -27,7 +27,7 @@
 #include <utility>
 #include <string>
 
-#include "tbb/parallel_for_each.h"
+#include "tbb/parallel_do.h"
 #include "tbb/parallel_for.h"
 #include "tbb/blocked_range.h"
 
@@ -1996,7 +1996,7 @@ public:
    *
    * @return true if the scan was added successfully, false otherwise
    */
-  virtual kt_bool Process(LocalizedRangeScan * pScan, Matrix3 * covariance = nullptr);
+  virtual kt_bool Process(LocalizedRangeScan * pScan);
 
   /**
    * Process an Object
@@ -2004,10 +2004,10 @@ public:
   virtual kt_bool Process(Object * pObject);
 
   // processors
-  kt_bool ProcessAtDock(LocalizedRangeScan * pScan, Matrix3 * covariance = nullptr);
-  kt_bool ProcessAgainstNode(LocalizedRangeScan * pScan, const int & nodeId, Matrix3 * covariance = nullptr);
-  kt_bool ProcessAgainstNodesNearBy(LocalizedRangeScan * pScan, kt_bool addScanToLocalizationBuffer = false, Matrix3 * covariance = nullptr);
-  kt_bool ProcessLocalization(LocalizedRangeScan * pScan, Matrix3 * covariance = nullptr);
+  kt_bool ProcessAtDock(LocalizedRangeScan * pScan);
+  kt_bool ProcessAgainstNode(LocalizedRangeScan * pScan, const int & nodeId);
+  kt_bool ProcessAgainstNodesNearBy(LocalizedRangeScan * pScan, kt_bool addScanToLocalizationBuffer = false);
+  kt_bool ProcessLocalization(LocalizedRangeScan * pScan);
   kt_bool RemoveNodeFromGraph(Vertex<LocalizedRangeScan> *);
   void AddScanToLocalizationBuffer(LocalizedRangeScan * pScan, Vertex<LocalizedRangeScan> * scan_vertex);
   void ClearLocalizationBuffer();
@@ -2084,11 +2084,6 @@ public:
   inline void CorrectPoses()
   {
     m_pGraph->CorrectPoses();
-  }
-
-  const LocalizationScanVertices& GetLocalizationVertices()
-  {
-    return m_LocalizationScanVertices;
   }
 
 protected:
@@ -2357,13 +2352,6 @@ protected:
   // whether to increase the search space if no good matches are initially found
   Parameter<kt_bool> * m_pUseResponseExpansion;
 
-  // Number of beams that must pass through a cell before it will be considered to be occupied 
-  // or unoccupied.  This prevents stray beams from messing up the map. 
-  Parameter<kt_int32u> * m_pMinPassThrough;
-
-  // Minimum ratio of beams hitting cell to beams passing through cell to be marked as occupied
-  Parameter<kt_double> * m_pOccupancyThreshold;
-
   friend class boost::serialization::access;
   template<class Archive>
   void serialize(Archive & ar, const unsigned int version)
@@ -2408,9 +2396,6 @@ protected:
     ar & BOOST_SERIALIZATION_NVP(m_pMinimumAnglePenalty);
     ar & BOOST_SERIALIZATION_NVP(m_pMinimumDistancePenalty);
     ar & BOOST_SERIALIZATION_NVP(m_pUseResponseExpansion);
-// NOTE: the following two lines are commented out to avoid breaking the serialization of already existing maps
-//    ar & BOOST_SERIALIZATION_NVP(m_pMinPassThrough); 
-//    ar & BOOST_SERIALIZATION_NVP(m_pOccupancyThreshold);
     std::cout << "**Finished serializing Mapper**\n";
   }
 
@@ -2454,8 +2439,6 @@ public:
   double getParamMinimumAnglePenalty();
   double getParamMinimumDistancePenalty();
   bool getParamUseResponseExpansion();
-  int getParamMinPassThrough();
-  double getParamOccupancyThreshold();
 
   /* Setters */
   // General Parameters
@@ -2494,8 +2477,6 @@ public:
   void setParamMinimumAnglePenalty(double d);
   void setParamMinimumDistancePenalty(double d);
   void setParamUseResponseExpansion(bool b);
-  void setParamMinPassThrough(int i);
-  void setParamOccupancyThreshold(double d);
 };
 BOOST_SERIALIZATION_ASSUME_ABSTRACT(Mapper)
 }  // namespace karto

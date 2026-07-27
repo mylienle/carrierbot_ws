@@ -13,12 +13,13 @@
 #include <unordered_map>
 #include <utility>
 #include <cmath>
-#include "karto_sdk/Mapper.h"
+// god... getting this to work in ROS2 was a real pain
+#include "../lib/karto_sdk/include/karto_sdk/Mapper.h"
 #include "solvers/ceres_utils.h"
 
 #include "rclcpp/rclcpp.hpp"
 #include "std_srvs/srv/empty.hpp"
-#include "slam_toolbox/toolbox_types.hpp"
+#include "../include/slam_toolbox/toolbox_types.hpp"
 
 namespace solver_plugins
 {
