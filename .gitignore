@@ -3,3 +3,4 @@
 /log
 .vscode/
 src/ros-imu-bno055/
+**/__pycache__/
