@@ -8,10 +8,17 @@ from ament_index_python.packages import get_package_share_directory
 
 def generate_launch_description():
     use_sim_time = LaunchConfiguration("use_sim_time")
+    drive_mode = LaunchConfiguration("drive_mode")
     
     use_sim_time_arg = DeclareLaunchArgument(
         "use_sim_time",
         default_value="false",
+    )
+
+    drive_mode_arg = DeclareLaunchArgument(
+        "drive_mode",
+        default_value="1",
+        description="Robot 1 CAN drive mode (robot_fablab_ws uses 1)",
     )
 
     robot_description = ParameterValue(Command([
@@ -21,7 +28,8 @@ def generate_launch_description():
             "urdf", 
             "my_robot.urdf.xacro"
         ),
-        " is_sim:=", use_sim_time
+        " is_sim:=", use_sim_time,
+        " drive_mode:=", drive_mode
     ]),
     value_type=str
 )
@@ -52,6 +60,7 @@ def generate_launch_description():
     )
     return LaunchDescription([
         use_sim_time_arg,
+        drive_mode_arg,
         robot_state_publisher_node,
         controller_manager
     ])

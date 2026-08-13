@@ -12,6 +12,7 @@ setup(
         ('share/' + package_name, ['package.xml']),
         ('share/' + package_name + '/launch', ['launch/goal_subscriber.launch.py']),
         ('share/' + package_name + '/launch', ['launch/reach_goal.launch.py']),
+        ('share/' + package_name + '/launch', ['launch/xoay_rfid.launch.py']),
     ],
     install_requires=['setuptools', 'paho-mqtt'],
     zip_safe=True,
@@ -24,6 +25,8 @@ setup(
         'console_scripts': [
             'goal_subscriber = carrierbot_mqtt.goal_subscriber:main',
             'reach_goal = carrierbot_mqtt.reach_goal:main',
+            'xoay_subscriber = carrierbot_mqtt.xoay_subscriber:main',
+            'rfid_publisher = carrierbot_mqtt.rfid_publisher:main',
         ],
     },
 )

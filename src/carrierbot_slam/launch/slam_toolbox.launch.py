@@ -15,6 +15,7 @@ def generate_launch_description():
     # Launch Configurations
     # ========================
     use_sim_time = LaunchConfiguration("use_sim_time")
+    drive_mode = LaunchConfiguration("drive_mode")
 
     channel_type = LaunchConfiguration("channel_type")
     serial_port = LaunchConfiguration("serial_port")
@@ -34,6 +35,12 @@ def generate_launch_description():
         default_value="false"
     )
 
+    drive_mode_arg = DeclareLaunchArgument(
+        "drive_mode",
+        default_value="1",
+        description="Robot 1 CAN drive mode",
+    )
+
     channel_type_arg = DeclareLaunchArgument(
         "channel_type",
         default_value="serial"
@@ -41,7 +48,7 @@ def generate_launch_description():
 
     serial_port_arg = DeclareLaunchArgument(
         "serial_port",
-        default_value="/dev/rplidar"
+        default_value="/dev/lidar"
     )
 
     serial_baudrate_arg = DeclareLaunchArgument(
@@ -112,7 +119,10 @@ def generate_launch_description():
                 "hardware_interface.launch.py"
             )
         ),
-        launch_arguments={"use_sim_time": use_sim_time}.items()
+        launch_arguments={
+            "use_sim_time": use_sim_time,
+            "drive_mode": drive_mode,
+        }.items()
     )
 
     controller = IncludeLaunchDescription(
@@ -152,7 +162,7 @@ def generate_launch_description():
         namespace="imu",
         output="screen",
         parameters=[
-            {"device": "/dev/i2c-8"},
+            {"device": "/dev/i2c-1"},
             {"address": 40},
             {"frame_id": "imu"},
         ]
@@ -225,6 +235,7 @@ def generate_launch_description():
 
         # Arguments
         use_sim_time_arg,
+        drive_mode_arg,
         channel_type_arg,
         serial_port_arg,
         serial_baudrate_arg,

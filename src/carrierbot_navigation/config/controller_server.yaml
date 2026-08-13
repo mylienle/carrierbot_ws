@@ -26,7 +26,7 @@ controller_server:
 
     FollowPath:
       plugin: "nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController"
-      desired_linear_vel: 2.0
+      desired_linear_vel: 0.8
       max_linear_accel: 1.0
       max_linear_decel: 1.5
       lookahead_dist: 1.2
@@ -117,9 +117,26 @@ local_costmap:
       height: 3
       resolution: 0.05
       robot_radius: 0.3
-      plugins: ["static_layer"]
+      plugins: ["static_layer", "obstacle_layer", "inflation_layer"]
       static_layer:
         plugin: "nav2_costmap_2d::StaticLayer"
         map_topic: /map
         map_subscribe_transient_local: True
+      obstacle_layer:
+        plugin: "nav2_costmap_2d::ObstacleLayer"
+        observation_sources: scan
+        scan:
+          topic: /scan_filtered
+          sensor_frame: laser
+          data_type: "LaserScan"
+          clearing: True
+          marking: True
+          obstacle_min_range: 0.5
+          obstacle_max_range: 12.0
+          raytrace_min_range: 0.5
+          raytrace_max_range: 12.0
+      inflation_layer:
+        plugin: "nav2_costmap_2d::InflationLayer"
+        inflation_radius: 0.6
+        cost_scaling_factor: 3.0
       always_send_full_costmap: True

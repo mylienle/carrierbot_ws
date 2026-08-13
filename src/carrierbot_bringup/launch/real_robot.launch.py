@@ -11,8 +11,10 @@ from launch.conditions import IfCondition
 def generate_launch_description():
     use_sim_time = LaunchConfiguration("use_sim_time")
     use_amcl = LaunchConfiguration("use_amcl")
+    map_file = LaunchConfiguration("map")
+    drive_mode = LaunchConfiguration("drive_mode")
     channel_type =  LaunchConfiguration('channel_type', default='serial')
-    serial_port = LaunchConfiguration('serial_port', default='/dev/rplidar')
+    serial_port = LaunchConfiguration('serial_port', default='/dev/lidar')
     serial_baudrate = LaunchConfiguration('serial_baudrate', default='1000000') #for s2 is 1000000
     frame_id = LaunchConfiguration('frame_id', default='laser')
     inverted = LaunchConfiguration('inverted', default='false')
@@ -28,6 +30,22 @@ def generate_launch_description():
         "use_amcl",
         default_value="true",
         description="Whether to launch AMCL, map_server, and navigation"
+    )
+
+    map_arg = DeclareLaunchArgument(
+        "map",
+        default_value=os.path.join(
+            get_package_share_directory("carrierbot_bringup"),
+            "maps",
+            "lab_map.yaml"
+        ),
+        description="Full path to the map YAML file"
+    )
+
+    drive_mode_arg = DeclareLaunchArgument(
+        "drive_mode",
+        default_value="1",
+        description="Robot 1 CAN drive mode",
     )
 
     channel_type_arg = DeclareLaunchArgument(
@@ -84,7 +102,7 @@ def generate_launch_description():
 
     laser_filter = Node(
         package="carrierbot_slam",
-        executable="laser_filter.py",
+        executable="laser_filter",
         name="laser_filter",
         output="screen",
         parameters=[{
@@ -105,7 +123,10 @@ def generate_launch_description():
                 "hardware_interface.launch.py"
             )
         ),
-        launch_arguments={"use_sim_time": use_sim_time}.items()
+        launch_arguments={
+            "use_sim_time": use_sim_time,
+            "drive_mode": drive_mode,
+        }.items()
     )
 
     controller = IncludeLaunchDescription(
@@ -126,7 +147,7 @@ def generate_launch_description():
         name="imu_node",
         output="screen",
         parameters=[
-            {"device": "/dev/i2c-8"},
+            {"device": "/dev/i2c-1"},
             {"address": 40},
             {"frame_id": "imu"},
         ]
@@ -155,7 +176,7 @@ def generate_launch_description():
                 "slam.launch.py"
             )
         ),
-        launch_arguments={"use_sim_time": use_sim_time}.items(),
+        launch_arguments={"use_sim_time": use_sim_time, "map": map_file}.items(),
         condition=IfCondition(use_amcl)
     )
 
@@ -185,6 +206,20 @@ def generate_launch_description():
         output="screen",
     )
 
+    mqtt_xoay = Node(
+        package="carrierbot_mqtt",
+        executable="xoay_subscriber",
+        name="mqtt_xoay_subscriber",
+        output="screen",
+    )
+
+    mqtt_rfid = Node(
+        package="carrierbot_mqtt",
+        executable="rfid_publisher",
+        name="rfid_mqtt_publisher",
+        output="screen",
+    )
+
     rviz = Node(
         package="rviz2",
         executable="rviz2",
@@ -203,6 +238,8 @@ def generate_launch_description():
     return LaunchDescription([
         use_sim_time_arg,
         use_amcl_arg,
+        map_arg,
+        drive_mode_arg,
         channel_type_arg,
         serial_port_arg,
         serial_baudrate_arg,
@@ -223,4 +260,6 @@ def generate_launch_description():
         TimerAction(period=14.0, actions=[rviz]),
         TimerAction(period=14.0, actions=[mqtt_subscriber]),
         TimerAction(period=14.0, actions=[mqtt_publisher]),
+        TimerAction(period=14.0, actions=[mqtt_xoay]),
+        TimerAction(period=14.0, actions=[mqtt_rfid]),
     ])

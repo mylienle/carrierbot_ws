@@ -31,11 +31,9 @@ install(
 
 # Install Python scripts
 install(PROGRAMS 
-  ${PROJECT_NAME}/laser_filter
   ${PROJECT_NAME}/laser_filter.py
-  ${PROJECT_NAME}/yaw_logger.py
-  ${PROJECT_NAME}/telemetry_logger.py
   DESTINATION lib/${PROJECT_NAME}
+  RENAME laser_filter
 )
 
 if(BUILD_TESTING)

@@ -28,8 +28,8 @@ carrierbot_controller:
     pose_covariance_diagonal: [0.001, 0.001, 0.001, 0.001, 0.001, 0.01]
     twist_covariance_diagonal: [0.001, 0.001, 0.001, 0.001, 0.001, 0.01]
 
-    wheel_radius: 0.0865
-    wheel_separation: 0.41
+    wheel_radius: 0.1
+    wheel_separation: 0.57
     left_wheel_radius_multiplier: 1.0
     right_wheel_radius_multiplier: 1.0
     wheel_separation_multiplier: 1.0

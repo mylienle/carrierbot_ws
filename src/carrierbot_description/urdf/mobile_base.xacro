@@ -6,8 +6,10 @@
     <xacro:property name="base_length" value="0.5" />
     <xacro:property name="base_width" value="0.5" />
     <xacro:property name="base_height" value="0.19" />
-    <xacro:property name="wheel_radius" value="0.0865" />
-    <xacro:property name="wheel_length" value="0.07" />
+    <!-- v1 (robot_fablab) wheel geometry -->
+    <xacro:property name="wheel_radius" value="0.1" />
+    <xacro:property name="wheel_length" value="0.05" />
+    <xacro:property name="wheel_separation" value="0.57" />
     <xacro:property name="upper_base_length" value="0.21" />
     <xacro:property name="upper_base_width" value="0.29" />
     <xacro:property name="upper_base_height" value="1.064"/>
@@ -111,14 +113,14 @@
     <joint name="base_right_wheel_joint" type="continuous">
         <parent link="base_link" />
         <child link="right_wheel_link" />
-        <origin xyz="0 ${-(base_width + wheel_length) / 2.0} 0" rpy="0 0 0" />
+        <origin xyz="0 ${-wheel_separation / 2.0} 0" rpy="0 0 0" />
         <axis xyz="0 1 0" />
     </joint>
 
     <joint name="base_left_wheel_joint" type="continuous">
         <parent link="base_link" />
         <child link="left_wheel_link" />
-        <origin xyz="0 ${(base_width + wheel_length) / 2.0} 0" rpy="0 0 0" />
+        <origin xyz="0 ${wheel_separation / 2.0} 0" rpy="0 0 0" />
         <axis xyz="0 1 0" />
     </joint>
 

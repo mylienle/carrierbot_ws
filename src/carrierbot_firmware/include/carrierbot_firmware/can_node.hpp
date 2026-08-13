@@ -12,6 +12,9 @@
 #include <chrono>
 #include <iostream>
 #include <cstring>
+#include <atomic>
+#include <memory>
+#include <stdexcept>
 
 class WaveshareCAN {
 public:
@@ -53,24 +56,22 @@ public:
     }
 
     void close() {
-        if (!rx_running_) {
-            return;  // Already closed
-        }
-        
         rx_running_ = false;
-        
-        // Đóng file descriptor trước để buộc thread read() thoát ra
+
+        // Đóng file descriptor trước để buộc thread read() thoát ra.
         if (fd_ != -1) {
             ::close(fd_);
             fd_ = -1;
         }
-        
-        // Bây giờ thread sẽ nhận exception "Bad file descriptor" và thoát ra
+
+        // Luôn join nếu thread đã được tạo, kể cả khi nó đã tự thoát.
         if (rx_thread_ && rx_thread_->joinable()) {
             rx_thread_->join();
         }
-        
-        std::cout << "Serial port closed\n";
+
+        if (rx_thread_) {
+            rx_thread_.reset();
+        }
     }
 
     void send(uint16_t can_id, const std::vector<uint8_t>& data) {
@@ -115,42 +116,23 @@ public:
             }
         }
 
-        // Read header (3 bytes)
-        std::vector<uint8_t> header(3);
-        if (!read_exact(header.data(), 3))
-        {
-            throw std::runtime_error("Failed to read header");
-        }
-
-        // Read CMD byte
+        // Frame format used by the v1 Waveshare adapter:
+        // AA C8 IDL IDH DATA[8] 55
         uint8_t cmd;
         if (!read_exact(&cmd, 1))
         {
             throw std::runtime_error("Failed to read CMD byte");
         }
-        // if (cmd != 0xC8) {
-        //     throw std::runtime_error("Invalid CMD byte");
-        // }
+        if (cmd != 0xC8)
+        {
+            throw std::runtime_error("Invalid CAN command byte");
+        }
 
-        // Read IDL (1 byte)
         uint8_t idl;
-        if (!read_exact(&idl, 1))
+        uint8_t idh;
+        if (!read_exact(&idl, 1) || !read_exact(&idh, 1))
         {
-            throw std::runtime_error("Failed to read IDL");
-        }
-
-        // Read IDH (3 bytes)
-        std::vector<uint8_t> idh(3);
-        if (!read_exact(idh.data(), 3))
-        {
-            throw std::runtime_error("Failed to read IDH");
-        }
-
-        // Read length (1 byte)
-        uint8_t length;
-        if (!read_exact(&length, 1))
-        {
-            throw std::runtime_error("Failed to read length");
+            throw std::runtime_error("Failed to read CAN ID");
         }
 
         // Read 8 data bytes
@@ -166,11 +148,13 @@ public:
         {
             throw std::runtime_error("Failed to read tail byte");
         }
-        // if (tail != 0x55) {
-        //     throw std::runtime_error("Invalid tail byte");
-        // }
+        if (tail != 0x55)
+        {
+            throw std::runtime_error("Invalid CAN frame tail");
+        }
 
-        uint16_t can_id = idl | (idh[0] << 8);
+        uint16_t can_id = static_cast<uint16_t>(idl) |
+                          (static_cast<uint16_t>(idh) << 8);
 
         // std::cout << "Received: ID=0x" << std::hex << can_id << " Data=";
         // for (uint8_t b : data)

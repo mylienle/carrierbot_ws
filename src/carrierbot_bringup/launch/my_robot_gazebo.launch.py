@@ -1,10 +1,9 @@
 import os
 from launch import LaunchDescription
-from launch.actions import IncludeLaunchDescription, TimerAction
+from launch.actions import IncludeLaunchDescription, TimerAction, DeclareLaunchArgument
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import PathJoinSubstitution, Command
+from launch.substitutions import Command, LaunchConfiguration
 from launch_ros.actions import Node
-from launch_ros.substitutions import FindPackageShare
 from ament_index_python.packages import get_package_share_directory
 
 
@@ -13,7 +12,14 @@ def generate_launch_description():
     ros_distro = os.environ.get('ROS_DISTRO', 'humble')
     
     # Set is_ignition based on distro
-    is_ignition = 'True' if ros_distro == "humble" else 'False'
+    is_ignition = 'False' if ros_distro == "foxy" else 'True'
+
+    world = LaunchConfiguration("world")
+    world_arg = DeclareLaunchArgument(
+        "world",
+        default_value="empty.sdf",
+        description="Gazebo Sim world name or absolute SDF path",
+    )
 
     # Package paths
     my_robot_description_dir = get_package_share_directory("carrierbot_description")
@@ -25,22 +31,18 @@ def generate_launch_description():
     urdf_path = os.path.join(my_robot_description_dir, "urdf", "my_robot.urdf.xacro")
     rviz_config_path = os.path.join(my_robot_description_dir, "rviz", "urdf_config.rviz")
     gazebo_config_path = os.path.join(my_robot_bringup_dir, "config", "gazebo_bridge.yaml")
-    world_path = os.path.join(my_robot_bringup_dir, "worlds", "test_world.sdf")
-    ros2_control_config_path = os.path.join(robot_controller_dir, "config", "ros2_control.yaml")
-    # World selection: comment/uncomment to switch
-    use_empty_world = True  # Set to True for empty world, False for test_world.sdf
-    
-    if use_empty_world:
-        gz_world_args = 'empty.sdf -r'
-    else:
-        gz_world_args = f'{world_path} -r'
+    gz_world_args = [world, " -r"]
     
     # Robot State Publisher
     robot_state_publisher_node = Node(
         package="robot_state_publisher",
         executable="robot_state_publisher",
         parameters=[{
-            'robot_description': Command(['xacro ', urdf_path, ' is_ignition:=', is_ignition])
+            'robot_description': Command([
+                'xacro ', urdf_path,
+                ' is_sim:=true',
+                ' is_ignition:=', is_ignition,
+            ])
         }]
     )
     
@@ -55,10 +57,14 @@ def generate_launch_description():
     )
     
     # Spawn Robot
-    spawn_robot_node = Node(
-        package="ros_gz_sim",
-        executable="create",
-        arguments=["-topic", "robot_description"]
+    spawn_robot_node = TimerAction(
+        period=2.0,
+        actions=[Node(
+            package="ros_gz_sim",
+            executable="create",
+            arguments=["-topic", "robot_description"],
+            output="screen",
+        )]
     )
     
     # ROS-Gazebo Bridge
@@ -80,7 +86,8 @@ def generate_launch_description():
     controller_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             os.path.join(robot_controller_dir, "launch", "controller.launch.py")
-        )
+        ),
+        launch_arguments={"use_sim_time": "true"}.items()
     )
     
     # Delay controller spawning by 5 seconds to ensure Gazebo and robot are ready
@@ -90,6 +97,7 @@ def generate_launch_description():
     )
     
     return LaunchDescription([
+        world_arg,
         robot_state_publisher_node,
         gazebo_sim,
         spawn_robot_node,
