@@ -413,6 +413,17 @@ namespace carrierbot_firmware
         const int left_pulse = convertPulse(left_mps * kVelocityScale);
         const int right_pulse = convertPulse(right_mps * kVelocityScale);
 
+        RCLCPP_INFO_THROTTLE(
+            rclcpp::get_logger("CarrierbotInterface"),
+            *ros_node_->get_clock(),
+            1000,
+            "CAN 0x030 wheel command: left=%.3f rad/s (%d pulse/s), "
+            "right=%.3f rad/s (%d pulse/s)",
+            left_cmd_rad_s,
+            left_pulse,
+            right_cmd_rad_s,
+            right_pulse);
+
         {
             std::lock_guard<std::mutex> lock(state_mutex_);
             telemetry_msg_.left_velocity = static_cast<float>(left_mps);
