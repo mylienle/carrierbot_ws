@@ -116,45 +116,54 @@ public:
             }
         }
 
-        // Frame format used by the v1 Waveshare adapter:
-        // AA C8 IDL IDH DATA[8] 55
-        uint8_t cmd;
-        if (!read_exact(&cmd, 1))
+        // RX format used by the original TX2 robot_fablab_ws code:
+        // AA 55 01 01 CMD ID0 ID1 ID2 ID3 LEN DATA[8] RESERVED CHECKSUM
+        // The old code intentionally did not require CMD == 0xC8 or a
+        // 0x55 tail.  C8 belongs to the variable-length TX command.
+        uint8_t header[3];
+        if (!read_exact(header, sizeof(header)))
         {
-            throw std::runtime_error("Failed to read CMD byte");
-        }
-        if (cmd != 0xC8)
-        {
-            throw std::runtime_error("Invalid CAN command byte");
+            throw std::runtime_error("Failed to read RX header");
         }
 
-        uint8_t idl;
-        uint8_t idh;
-        if (!read_exact(&idl, 1) || !read_exact(&idh, 1))
+        uint8_t frame_type;
+        if (!read_exact(&frame_type, 1))
+        {
+            throw std::runtime_error("Failed to read RX frame type");
+        }
+
+        uint8_t id0;
+        uint8_t id_rest[3];
+        if (!read_exact(&id0, 1) || !read_exact(id_rest, sizeof(id_rest)))
         {
             throw std::runtime_error("Failed to read CAN ID");
         }
 
-        // Read 8 data bytes
+        uint8_t length;
+        if (!read_exact(&length, 1))
+        {
+            throw std::runtime_error("Failed to read CAN length");
+        }
+
         std::vector<uint8_t> data(8);
-        if (!read_exact(data.data(), 8))
+        if (!read_exact(data.data(), data.size()))
         {
-            throw std::runtime_error("Failed to read data bytes");
+            throw std::runtime_error("Failed to read CAN data");
         }
 
-        // Read tail byte
-        uint8_t tail;
-        if (!read_exact(&tail, 1))
+        // Byte 18 is reserved in the fixed RX frame.  The legacy TX2 code
+        // called it tail and ignored its value; preserve that behavior.
+        uint8_t reserved;
+        if (!read_exact(&reserved, 1))
         {
-            throw std::runtime_error("Failed to read tail byte");
-        }
-        if (tail != 0x55)
-        {
-            throw std::runtime_error("Invalid CAN frame tail");
+            throw std::runtime_error("Failed to read RX reserved byte");
         }
 
-        uint16_t can_id = static_cast<uint16_t>(idl) |
-                          (static_cast<uint16_t>(idh) << 8);
+        // The final checksum is optional in the legacy implementation.  Do
+        // not consume it here so the behavior remains identical to TX2.
+
+        uint16_t can_id = static_cast<uint16_t>(id0) |
+                          (static_cast<uint16_t>(id_rest[0]) << 8);
 
         // std::cout << "Received: ID=0x" << std::hex << can_id << " Data=";
         // for (uint8_t b : data)
