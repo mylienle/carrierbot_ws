@@ -18,7 +18,7 @@
         <xacro:unless value="$(arg is_sim)">
             <hardware>
                 <plugin>carrierbot_firmware::CarrierbotInterface</plugin>
-                <param name="port">/dev/usbcan</param>
+                <param name="port">$(arg can_port)</param>
                 <param name="baudrate">2000000</param>
                 <!-- robot_fablab_ws hardware launch uses mode 1; poll 0x050 @ 20 Hz -->
                 <param name="drive_mode">$(arg drive_mode)</param>

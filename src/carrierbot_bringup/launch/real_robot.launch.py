@@ -1,8 +1,9 @@
 import os
+import glob
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch_ros.actions import Node
-from launch.actions import IncludeLaunchDescription, TimerAction, DeclareLaunchArgument
+from launch.actions import IncludeLaunchDescription, TimerAction, DeclareLaunchArgument, LogInfo
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch.conditions import IfCondition
@@ -14,7 +15,11 @@ def generate_launch_description():
     map_file = LaunchConfiguration("map")
     drive_mode = LaunchConfiguration("drive_mode")
     channel_type =  LaunchConfiguration('channel_type', default='serial')
-    serial_port = LaunchConfiguration('serial_port', default='/dev/lidar')
+    serial_port = LaunchConfiguration('serial_port')
+    lidar_port_default = next(
+        iter(sorted(glob.glob("/dev/serial/by-id/*CP2102N*"))),
+        "/dev/lidar",
+    )
     serial_baudrate = LaunchConfiguration('serial_baudrate', default='1000000') #for s2 is 1000000
     frame_id = LaunchConfiguration('frame_id', default='laser')
     inverted = LaunchConfiguration('inverted', default='false')
@@ -55,8 +60,10 @@ def generate_launch_description():
 
     serial_port_arg = DeclareLaunchArgument(
             'serial_port',
-            default_value=serial_port,
+            default_value=lidar_port_default,
             description='Specifying usb port to connected lidar')
+
+    lidar_port_log = LogInfo(msg=["Using LiDAR serial device: ", serial_port])
 
     serial_baudrate_arg = DeclareLaunchArgument(
             'serial_baudrate',
@@ -242,6 +249,7 @@ def generate_launch_description():
         drive_mode_arg,
         channel_type_arg,
         serial_port_arg,
+        lidar_port_log,
         serial_baudrate_arg,
         frame_id_arg,
         inverted_arg,
