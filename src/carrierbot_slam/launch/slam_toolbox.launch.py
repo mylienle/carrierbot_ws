@@ -4,6 +4,7 @@ from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, TimerAction
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration, Command
+from launch.conditions import IfCondition
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
 from ament_index_python.packages import get_package_share_directory
@@ -16,6 +17,7 @@ def generate_launch_description():
     # ========================
     use_sim_time = LaunchConfiguration("use_sim_time")
     drive_mode = LaunchConfiguration("drive_mode")
+    use_imu = LaunchConfiguration("use_imu")
 
     channel_type = LaunchConfiguration("channel_type")
     serial_port = LaunchConfiguration("serial_port")
@@ -39,6 +41,12 @@ def generate_launch_description():
         "drive_mode",
         default_value="1",
         description="Robot 1 CAN drive mode",
+    )
+
+    use_imu_arg = DeclareLaunchArgument(
+        "use_imu",
+        default_value="false",
+        description="Launch the optional BNO055 I2C driver"
     )
 
     channel_type_arg = DeclareLaunchArgument(
@@ -165,7 +173,8 @@ def generate_launch_description():
             {"device": "/dev/i2c-1"},
             {"address": 40},
             {"frame_id": "imu"},
-        ]
+        ],
+        condition=IfCondition(use_imu),
     )
 
     # EKF localization for odom -> base_footprint TF
@@ -236,6 +245,7 @@ def generate_launch_description():
         # Arguments
         use_sim_time_arg,
         drive_mode_arg,
+        use_imu_arg,
         channel_type_arg,
         serial_port_arg,
         serial_baudrate_arg,

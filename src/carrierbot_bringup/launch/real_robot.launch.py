@@ -12,6 +12,7 @@ from launch.conditions import IfCondition
 def generate_launch_description():
     use_sim_time = LaunchConfiguration("use_sim_time")
     use_amcl = LaunchConfiguration("use_amcl")
+    use_imu = LaunchConfiguration("use_imu")
     map_file = LaunchConfiguration("map")
     drive_mode = LaunchConfiguration("drive_mode")
     channel_type =  LaunchConfiguration('channel_type', default='serial')
@@ -35,6 +36,12 @@ def generate_launch_description():
         "use_amcl",
         default_value="true",
         description="Whether to launch AMCL, map_server, and navigation"
+    )
+
+    use_imu_arg = DeclareLaunchArgument(
+        "use_imu",
+        default_value="false",
+        description="Launch the optional BNO055 I2C driver"
     )
 
     map_arg = DeclareLaunchArgument(
@@ -157,7 +164,8 @@ def generate_launch_description():
             {"device": "/dev/i2c-1"},
             {"address": 40},
             {"frame_id": "imu"},
-        ]
+        ],
+        condition=IfCondition(use_imu),
     )
 
     robot_localization = Node(
@@ -245,6 +253,7 @@ def generate_launch_description():
     return LaunchDescription([
         use_sim_time_arg,
         use_amcl_arg,
+        use_imu_arg,
         map_arg,
         drive_mode_arg,
         channel_type_arg,

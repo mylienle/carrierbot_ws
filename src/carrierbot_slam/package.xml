@@ -17,7 +17,6 @@
   <exec_depend>carrierbot_controller</exec_depend>
   <exec_depend>carrierbot_datalog</exec_depend>
   <exec_depend>carrierbot_firmware</exec_depend>
-  <exec_depend>imu_bno055</exec_depend>
   <exec_depend>nav2_amcl</exec_depend>
   <exec_depend>nav2_lifecycle_manager</exec_depend>
   <exec_depend>nav2_map_server</exec_depend>
