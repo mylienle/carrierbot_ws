@@ -23,10 +23,12 @@ install(
   DESTINATION share/${PROJECT_NAME}
 )
 
-install(
-  PROGRAMS scripts/cmd_vel_angular_inverter.py
-  DESTINATION lib/${PROJECT_NAME}
-)
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/scripts/cmd_vel_angular_inverter.py")
+  install(
+    PROGRAMS scripts/cmd_vel_angular_inverter.py
+    DESTINATION lib/${PROJECT_NAME}
+  )
+endif()
 
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
