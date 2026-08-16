@@ -77,7 +77,9 @@ if(BUILD_TESTING)
   ament_lint_auto_find_test_dependencies()
 
   find_package(ament_cmake_gtest REQUIRED)
-  add_subdirectory(plugins/test)
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/plugins/test")
+    add_subdirectory(plugins/test)
+  endif()
 endif()
 
 ament_target_dependencies(${executable_name}
