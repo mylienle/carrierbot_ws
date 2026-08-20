@@ -41,7 +41,7 @@ def generate_launch_description():
     use_imu_arg = DeclareLaunchArgument(
         "use_imu",
         default_value="false",
-        description="Launch the optional BNO055 I2C driver"
+        description="Launch the BNO055 I2C driver on /dev/i2c-1 at address 0x28"
     )
 
     map_arg = DeclareLaunchArgument(
@@ -155,16 +155,17 @@ def generate_launch_description():
     )
 
     imu = Node(
-        package="imu_bno055",
-        executable="bno055_i2c_node",
-        namespace="imu",
-        name="imu_node",
+        package="bno055",
+        executable="bno055",
+        name="bno055",
         output="screen",
         parameters=[
-            {"device": "/dev/i2c-1"},
-            {"address": 40},
+            {"connection_type": "i2c"},
+            {"i2c_bus": 1},
+            {"i2c_address": 40},
             {"frame_id": "imu"},
         ],
+        remappings=[("/bno055/imu", "/imu/data")],
         condition=IfCondition(use_imu),
     )
 
