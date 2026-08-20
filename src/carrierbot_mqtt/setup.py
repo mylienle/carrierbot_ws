@@ -27,6 +27,7 @@ setup(
             'reach_goal = carrierbot_mqtt.reach_goal:main',
             'xoay_subscriber = carrierbot_mqtt.xoay_subscriber:main',
             'rfid_publisher = carrierbot_mqtt.rfid_publisher:main',
+            'location_publisher = carrierbot_mqtt.location_publisher:main',
         ],
     },
 )

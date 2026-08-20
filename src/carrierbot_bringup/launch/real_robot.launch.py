@@ -49,7 +49,7 @@ def generate_launch_description():
         default_value=os.path.join(
             get_package_share_directory("carrierbot_bringup"),
             "maps",
-            "lab_map.yaml"
+            "new_map2.yaml"
         ),
         description="Full path to the map YAML file"
     )
@@ -235,6 +235,13 @@ def generate_launch_description():
         output="screen",
     )
 
+    mqtt_location = Node(
+        package="carrierbot_mqtt",
+        executable="location_publisher",
+        name="mqtt_location_publisher",
+        output="screen",
+    )
+
     rviz = Node(
         package="rviz2",
         executable="rviz2",
@@ -279,4 +286,5 @@ def generate_launch_description():
         TimerAction(period=14.0, actions=[mqtt_publisher]),
         TimerAction(period=14.0, actions=[mqtt_xoay]),
         TimerAction(period=14.0, actions=[mqtt_rfid]),
+        TimerAction(period=14.0, actions=[mqtt_location]),
     ])
