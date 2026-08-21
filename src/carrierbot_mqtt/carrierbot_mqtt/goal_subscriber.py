@@ -12,7 +12,7 @@ MQTT_PORT = 1883
 MQTT_KEEPALIVE_INTERVAL = 5
 MQTT_USERNAME = "client"
 MQTT_PASSWORD = "viam1234"
-MQTT_TOPIC = "robot2/goal"
+MQTT_TOPIC = "robot/goal"
 
 # --- Goal coordinates mapping ---
 GOAL_COORDINATES = {
@@ -21,6 +21,7 @@ GOAL_COORDINATES = {
     "DestinationPoint3": {"x": 1.4895777244658523, "y": 1.1899790896165576, "z": 0.0, "qx": 0.0, "qy": 0.0, "qz": 1.0, "qw": 0.0},
     "DestinationPoint4": {"x": 0.0, "y": 0.0, "z": 0.0, "qx": 0.0, "qy": 0.0, "qz": 1.0, "qw": 0.0},
     # Add more goals here
+    "WaterIntake": {"x": 5.6745, "y": 3.7549, "z": 0.0, "qx": 0.0, "qy": 0.0, "qz": -0.01, "qw": 1.0},
 }
 
 # --- MQTTGoalSubscriber Node ---
@@ -88,9 +89,10 @@ class MQTTGoalSubscriber(Node):
     def on_connect(self, mosq, obj, flags, rc):
         self.get_logger().info(f"Connect to MQTT broker success (rc={rc})")
         mosq.subscribe(MQTT_TOPIC, 0)
+        self.get_logger().info(f"Subscribed to topic: {MQTT_TOPIC}")
 
     def on_subscribe(self, mosq, obj, mid, granted_qos):
-        self.get_logger().info(f"Subscribed to topic: {MQTT_TOPIC}")
+        self.get_logger().debug(f"MQTT subscription acknowledged (mid={mid})")
     
     def mqtt_loop_callback(self):
         self.mqttc.loop(0.1)  # handle MQTT in loop

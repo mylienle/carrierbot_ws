@@ -40,7 +40,7 @@ def generate_launch_description():
 
     use_imu_arg = DeclareLaunchArgument(
         "use_imu",
-        default_value="false",
+        default_value="true",
         description="Launch the BNO055 I2C driver on /dev/i2c-1 at address 0x28"
     )
 
@@ -243,6 +243,13 @@ def generate_launch_description():
         output="screen",
     )
 
+    mqtt_velocity = Node(
+        package="carrierbot_mqtt",
+        executable="velocity_publisher",
+        name="mqtt_velocity_publisher",
+        output="screen",
+    )
+
     rviz = Node(
         package="rviz2",
         executable="rviz2",
@@ -288,4 +295,5 @@ def generate_launch_description():
         TimerAction(period=14.0, actions=[mqtt_xoay]),
         TimerAction(period=14.0, actions=[mqtt_rfid]),
         TimerAction(period=14.0, actions=[mqtt_location]),
+        TimerAction(period=14.0, actions=[mqtt_velocity]),
     ])

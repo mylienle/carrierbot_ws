@@ -28,6 +28,7 @@ setup(
             'xoay_subscriber = carrierbot_mqtt.xoay_subscriber:main',
             'rfid_publisher = carrierbot_mqtt.rfid_publisher:main',
             'location_publisher = carrierbot_mqtt.location_publisher:main',
+            'velocity_publisher = carrierbot_mqtt.velocity_publisher:main',
         ],
     },
 )

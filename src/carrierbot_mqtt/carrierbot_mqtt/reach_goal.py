@@ -12,7 +12,7 @@ MQTT_PORT = 1883
 MQTT_KEEPALIVE_INTERVAL = 5
 MQTT_USERNAME = "client"
 MQTT_PASSWORD = "viam1234"
-MQTT_ARRIVAL_TOPIC = "robot2/arrival"
+MQTT_ARRIVAL_TOPIC = "robot/arrival"
 
 class GoalStatusMonitor(Node):
     def __init__(self):
@@ -79,12 +79,7 @@ class GoalStatusMonitor(Node):
         """Publish arrival to MQTT"""
         try:
             if self.mqttc.is_connected():
-                self.mqttc.publish(
-                    MQTT_ARRIVAL_TOPIC,
-                    "true",
-                    qos=1,
-                    retain=False
-                )
+                self.mqttc.publish(MQTT_ARRIVAL_TOPIC, "true", qos=1, retain=False)
                 self.get_logger().info(f"✅ Published 'true' to {MQTT_ARRIVAL_TOPIC}")
             else:
                 self.get_logger().error("❌ MQTT not connected")
