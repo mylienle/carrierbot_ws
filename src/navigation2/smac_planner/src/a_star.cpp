@@ -51,7 +51,12 @@ AStarAlgorithm<NodeT>::AStarAlgorithm(
   _motion_model(motion_model),
   _collision_checker(nullptr)
 {
-  _graph.reserve(100000);
+  // Do not reserve a large graph during node startup.  On the Xavier this
+  // eager allocation can fail before Nav2 has even received a goal, which
+  // brings down the planner lifecycle node.  The unordered map grows as the
+  // search explores cells, so keeping a small initial bucket count preserves
+  // the planner behaviour while avoiding a large up-front allocation.
+  _graph.reserve(4096);
 }
 
 template<typename NodeT>
