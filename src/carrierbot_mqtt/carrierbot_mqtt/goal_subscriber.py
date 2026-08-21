@@ -1,18 +1,25 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+import json
+
 import rclpy
 from rclpy.node import Node
 from geometry_msgs.msg import PoseStamped
 import paho.mqtt.client as mqtt
 
-# --- Config MQTT ---
-MQTT_HOST = "45.117.177.157"
-MQTT_PORT = 1883
-MQTT_KEEPALIVE_INTERVAL = 5
-MQTT_USERNAME = "client"
-MQTT_PASSWORD = "viam1234"
-MQTT_TOPIC = "robot/goal"
+from .mqtt_config import (
+    MQTT_HOST,
+    MQTT_KEEPALIVE_INTERVAL,
+    MQTT_PASSWORD,
+    MQTT_PORT,
+    MQTT_QOS,
+    MQTT_TOPICS,
+    MQTT_USERNAME,
+)
+
+MQTT_TOPIC = MQTT_TOPICS["goal"]
+WATER_INTAKE_TOPIC = MQTT_TOPICS["water_intake"]
 
 # --- Goal coordinates mapping ---
 GOAL_COORDINATES = {
@@ -22,6 +29,18 @@ GOAL_COORDINATES = {
     "DestinationPoint4": {"x": 0.0, "y": 0.0, "z": 0.0, "qx": 0.0, "qy": 0.0, "qz": 1.0, "qw": 0.0},
     # Add more goals here
     "WaterIntake": {"x": 5.6745, "y": 3.7549, "z": 0.0, "qx": 0.0, "qy": 0.0, "qz": -0.01, "qw": 1.0},
+}
+
+def normalize_goal_name(value):
+    """Compare configured destination names without case or separators."""
+    return ''.join(char for char in value.casefold() if char.isalnum())
+
+
+# Keep every configured destination, while accepting common client spellings
+# such as ``Water intake``, ``water_intake`` and ``Destination Point 1``.
+# This changes no coordinate and does not replace the robot1 waypoints flow.
+NORMALIZED_GOALS = {
+    normalize_goal_name(name): name for name in GOAL_COORDINATES
 }
 
 # --- MQTTGoalSubscriber Node ---
@@ -58,6 +77,21 @@ class MQTTGoalSubscriber(Node):
         try:
             self.get_logger().info(f"=== Received MQTT message from topic: {msg.topic} ===")
             payload = msg.payload.decode("utf-8").strip().strip('"')
+
+            # robot/water_intake is a command alias. Any affirmative payload
+            # selects the existing WaterIntake destination.
+            if msg.topic == WATER_INTAKE_TOPIC:
+                payload = "WaterIntake"
+            else:
+                try:
+                    decoded = json.loads(payload)
+                    if isinstance(decoded, dict):
+                        payload = decoded.get("goal") or decoded.get("destination") or decoded.get("name") or payload
+                except json.JSONDecodeError:
+                    pass
+
+                payload = NORMALIZED_GOALS.get(normalize_goal_name(payload), payload)
+
             self.get_logger().info(f"Payload: {payload}")
 
             if payload in GOAL_COORDINATES:
@@ -88,8 +122,14 @@ class MQTTGoalSubscriber(Node):
 
     def on_connect(self, mosq, obj, flags, rc):
         self.get_logger().info(f"Connect to MQTT broker success (rc={rc})")
-        mosq.subscribe(MQTT_TOPIC, 0)
-        self.get_logger().info(f"Subscribed to topic: {MQTT_TOPIC}")
+        subscriptions = [
+            (MQTT_TOPIC, MQTT_QOS),
+            (WATER_INTAKE_TOPIC, MQTT_QOS),
+        ]
+        mosq.subscribe(subscriptions)
+        self.get_logger().info(
+            f"Subscribed to topics: {MQTT_TOPIC}, {WATER_INTAKE_TOPIC}"
+        )
 
     def on_subscribe(self, mosq, obj, mid, granted_qos):
         self.get_logger().debug(f"MQTT subscription acknowledged (mid={mid})")

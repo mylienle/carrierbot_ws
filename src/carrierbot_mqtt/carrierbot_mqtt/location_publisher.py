@@ -14,13 +14,18 @@ import rclpy
 from geometry_msgs.msg import PoseWithCovarianceStamped
 from rclpy.node import Node
 
+from .mqtt_config import (
+    MQTT_HOST,
+    MQTT_KEEPALIVE_INTERVAL,
+    MQTT_PASSWORD,
+    MQTT_PORT,
+    MQTT_QOS,
+    MQTT_RETAIN,
+    MQTT_TOPICS,
+    MQTT_USERNAME,
+)
 
-MQTT_HOST = "45.117.177.157"
-MQTT_PORT = 1883
-MQTT_KEEPALIVE_INTERVAL = 5
-MQTT_USERNAME = "client"
-MQTT_PASSWORD = "viam1234"
-MQTT_TOPIC = "robot/location"
+MQTT_TOPIC = MQTT_TOPICS["location"]
 
 
 class LocationPublisher(Node):
@@ -81,7 +86,9 @@ class LocationPublisher(Node):
                 "theta": math.degrees(yaw_rad),
             }
         )
-        result = self.mqttc.publish(MQTT_TOPIC, payload, qos=0, retain=False)
+        result = self.mqttc.publish(
+            MQTT_TOPIC, payload, qos=MQTT_QOS, retain=MQTT_RETAIN
+        )
         if result.rc != mqtt.MQTT_ERR_SUCCESS:
             self.get_logger().error(f"MQTT location publish failed rc={result.rc}")
 

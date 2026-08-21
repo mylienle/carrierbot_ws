@@ -7,13 +7,16 @@ from rclpy.node import Node
 from std_msgs.msg import String
 import paho.mqtt.client as mqtt
 
-# --- Config MQTT (same as v1 MQTT/name_publisher.py) ---
-MQTT_HOST = "45.117.177.157"
-MQTT_PORT = 1883
-MQTT_KEEPALIVE_INTERVAL = 5
-MQTT_USERNAME = "client"
-MQTT_PASSWORD = "viam1234"
-MQTT_TOPIC = "robot/attendance"
+from .mqtt_config import (
+    MQTT_HOST,
+    MQTT_KEEPALIVE_INTERVAL,
+    MQTT_PASSWORD,
+    MQTT_PORT,
+    MQTT_TOPICS,
+    MQTT_USERNAME,
+)
+
+MQTT_TOPIC = MQTT_TOPICS["attendance"]
 
 
 class RFIDPublisher(Node):

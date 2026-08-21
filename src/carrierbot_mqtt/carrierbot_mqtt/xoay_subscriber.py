@@ -7,13 +7,17 @@ from rclpy.node import Node
 from std_msgs.msg import Float32
 import paho.mqtt.client as mqtt
 
-# --- Config MQTT (same as v1 subscribe_mqtt/xoay_subscriber.py) ---
-MQTT_HOST = "45.117.177.157"
-MQTT_PORT = 1883
-MQTT_KEEPALIVE_INTERVAL = 5
-MQTT_USERNAME = "client"
-MQTT_PASSWORD = "viam1234"
-MQTT_TOPIC = "robot/xoay"
+from .mqtt_config import (
+    MQTT_HOST,
+    MQTT_KEEPALIVE_INTERVAL,
+    MQTT_PASSWORD,
+    MQTT_PORT,
+    MQTT_QOS,
+    MQTT_TOPICS,
+    MQTT_USERNAME,
+)
+
+MQTT_TOPIC = MQTT_TOPICS["xoay"]
 
 
 class MQTTXoaySubscriber(Node):
@@ -64,7 +68,7 @@ class MQTTXoaySubscriber(Node):
 
     def on_connect(self, mosq, obj, flags, rc):
         self.get_logger().info(f"Connect to MQTT broker success (rc={rc})")
-        mosq.subscribe(MQTT_TOPIC, 0)
+        mosq.subscribe(MQTT_TOPIC, MQTT_QOS)
 
     def on_subscribe(self, mosq, obj, mid, granted_qos):
         self.get_logger().info(f"Subscribed to topic: {MQTT_TOPIC}")

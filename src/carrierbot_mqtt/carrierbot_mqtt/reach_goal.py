@@ -6,13 +6,18 @@ from rclpy.node import Node
 from action_msgs.msg import GoalStatusArray
 import paho.mqtt.client as mqtt
 
-# --- Config MQTT ---
-MQTT_HOST = "45.117.177.157"
-MQTT_PORT = 1883
-MQTT_KEEPALIVE_INTERVAL = 5
-MQTT_USERNAME = "client"
-MQTT_PASSWORD = "viam1234"
-MQTT_ARRIVAL_TOPIC = "robot/arrival"
+from .mqtt_config import (
+    MQTT_HOST,
+    MQTT_KEEPALIVE_INTERVAL,
+    MQTT_PASSWORD,
+    MQTT_PORT,
+    MQTT_QOS,
+    MQTT_RETAIN,
+    MQTT_TOPICS,
+    MQTT_USERNAME,
+)
+
+MQTT_ARRIVAL_TOPIC = MQTT_TOPICS["arrival"]
 
 class GoalStatusMonitor(Node):
     def __init__(self):
@@ -79,7 +84,12 @@ class GoalStatusMonitor(Node):
         """Publish arrival to MQTT"""
         try:
             if self.mqttc.is_connected():
-                self.mqttc.publish(MQTT_ARRIVAL_TOPIC, "true", qos=1, retain=False)
+                self.mqttc.publish(
+                    MQTT_ARRIVAL_TOPIC,
+                    "true",
+                    qos=MQTT_QOS,
+                    retain=MQTT_RETAIN,
+                )
                 self.get_logger().info(f"✅ Published 'true' to {MQTT_ARRIVAL_TOPIC}")
             else:
                 self.get_logger().error("❌ MQTT not connected")

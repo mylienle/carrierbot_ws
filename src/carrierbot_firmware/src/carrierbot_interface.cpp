@@ -155,24 +155,20 @@ namespace carrierbot_firmware
 
     void CarrierbotInterface::sendRotateAngle(double angle_deg)
     {
-        // robot_fablab_ws/src/MQTT/xoay_subscriber.py sends angle*100
-        // as signed int16, big-endian, in the first two CAN data bytes.
-        const double scaled = angle_deg * 100.0;
         const double clamped = std::max(
-            static_cast<double>(std::numeric_limits<int16_t>::min()),
-            std::min(scaled, static_cast<double>(std::numeric_limits<int16_t>::max())));
-        const int16_t angle_scaled = static_cast<int16_t>(clamped);
-        const uint16_t encoded = static_cast<uint16_t>(angle_scaled);
+            0.0,
+            std::min(angle_deg, static_cast<double>(std::numeric_limits<uint16_t>::max())));
+        const uint16_t encoded = static_cast<uint16_t>(clamped);
 
         std::vector<uint8_t> data(8, 0);
-        data[0] = static_cast<uint8_t>((encoded >> 8) & 0xFF);
-        data[1] = static_cast<uint8_t>(encoded & 0xFF);
+        data[0] = static_cast<uint8_t>(encoded & 0xFF);
+        data[1] = static_cast<uint8_t>((encoded >> 8) & 0xFF);
         sendCan(0x040, data);
 
         RCLCPP_INFO(
             rclcpp::get_logger("CarrierbotInterface"),
-            "Sent rotate angle %.2f (scaled=%d) via CAN 0x040",
-            angle_deg, static_cast<int>(angle_scaled));
+            "Sent rotate angle %.2f (CAN value=%u degrees) via CAN 0x040",
+            angle_deg, static_cast<unsigned int>(encoded));
     }
 
     void CarrierbotInterface::onRotateAngle(const std_msgs::msg::Float32::SharedPtr msg)
@@ -408,7 +404,7 @@ namespace carrierbot_firmware
         }
 
         // rad/s -> m/s, then apply v1 ×20 before pulse conversion
-        const double left_mps = left_cmd_rad_s * kWheelRadiusM;
+        const double left_mps = -left_cmd_rad_s * kWheelRadiusM;
         const double right_mps = right_cmd_rad_s * kWheelRadiusM;
         const int left_pulse = convertPulse(left_mps * kVelocityScale);
         const int right_pulse = convertPulse(right_mps * kVelocityScale);
