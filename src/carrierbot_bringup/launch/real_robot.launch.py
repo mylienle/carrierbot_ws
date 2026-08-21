@@ -222,13 +222,6 @@ def generate_launch_description():
         output="screen",
     )
 
-    mqtt_xoay = Node(
-        package="carrierbot_mqtt",
-        executable="xoay_subscriber",
-        name="mqtt_xoay_subscriber",
-        output="screen",
-    )
-
     mqtt_rfid = Node(
         package="carrierbot_mqtt",
         executable="rfid_publisher",
@@ -292,7 +285,6 @@ def generate_launch_description():
         TimerAction(period=14.0, actions=[rviz]),
         TimerAction(period=14.0, actions=[mqtt_subscriber]),
         TimerAction(period=14.0, actions=[mqtt_publisher]),
-        TimerAction(period=14.0, actions=[mqtt_xoay]),
         TimerAction(period=14.0, actions=[mqtt_rfid]),
         TimerAction(period=14.0, actions=[mqtt_location]),
         TimerAction(period=14.0, actions=[mqtt_velocity]),
