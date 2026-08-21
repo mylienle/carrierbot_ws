@@ -27,8 +27,20 @@ GOAL_COORDINATES = {
     "DestinationPoint2": {"x": -9.502463883942948, "y": 3.604801781709745, "z": 0.0, "qx": 0.0, "qy": 0.0, "qz": 1.0, "qw": 0.0},
     "DestinationPoint3": {"x": 1.4895777244658523, "y": 1.1899790896165576, "z": 0.0, "qx": 0.0, "qy": 0.0, "qz": 1.0, "qw": 0.0},
     "DestinationPoint4": {"x": 0.0, "y": 0.0, "z": 0.0, "qx": 0.0, "qy": 0.0, "qz": 1.0, "qw": 0.0},
-    # Add more goals here
-    "WaterIntake": {"x": 5.6745, "y": 3.7549, "z": 0.0, "qx": 0.0, "qy": 0.0, "qz": -0.01, "qw": 1.0},
+    # B1 GUI destinations.  The GUI's B1_config_wp.json uses pixels on
+    # new_map2 (1675 x 1039), resolution 0.05 m/px and origin
+    # [-23.371523, -12.247928].  These are the corresponding map-frame
+    # coordinates.  Keep the older DestinationPoint entries above for
+    # backward compatibility with existing clients.
+    "Table_1": {"x": 19.828477, "y": 15.302072, "z": 0.0, "qx": 0.0, "qy": 0.0, "qz": 0.0, "qw": 1.0},
+    "Restroom": {"x": 12.478477, "y": 14.452072, "z": 0.0, "qx": 0.0, "qy": 0.0, "qz": 0.0, "qw": 1.0},
+    "WaterIntake": {"x": 13.628477, "y": 26.252072, "z": 0.0, "qx": 0.0, "qy": 0.0, "qz": 0.0, "qw": 1.0},
+    "Water intake": {"x": 13.628477, "y": 26.252072, "z": 0.0, "qx": 0.0, "qy": 0.0, "qz": 0.0, "qw": 1.0},
+    "Home": {"x": 17.878477, "y": 20.452072, "z": 0.0, "qx": 0.0, "qy": 0.0, "qz": 0.0, "qw": 1.0},
+    "Chemistry hall": {"x": 19.128477, "y": 26.252072, "z": 0.0, "qx": 0.0, "qy": 0.0, "qz": 0.0, "qw": 1.0},
+    "Robotics lab": {"x": -0.171523, "y": 0.102072, "z": 0.0, "qx": 0.0, "qy": 0.0, "qz": 0.0, "qw": 1.0},
+    "Stairs": {"x": 17.628477, "y": 3.352072, "z": 0.0, "qx": 0.0, "qy": 0.0, "qz": 0.0, "qw": 1.0},
+    "Table2": {"x": 23.128477, "y": 24.452072, "z": 0.0, "qx": 0.0, "qy": 0.0, "qz": 0.0, "qw": 1.0},
 }
 
 def normalize_goal_name(value):
