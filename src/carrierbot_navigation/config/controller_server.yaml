@@ -26,32 +26,27 @@ controller_server:
       stateful: True
 
     FollowPath:
-      plugin: "nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController"
-      desired_linear_vel: 0.8
-      max_linear_accel: 1.0
-      max_linear_decel: 1.5
-      lookahead_dist: 1.2
-      min_lookahead_dist: 0.25
-      max_lookahead_dist: 1.5
-      lookahead_time: 1.5
-      rotate_to_heading_angular_vel: 2.0
+      # Project-owned controller. Nav2 supplies the path; LOS+PID supplies /cmd_vel.
+      plugin: "carrierbot_navigation::LosPdController"
+      linear_speed: 0.8
+      min_linear_speed: 0.3
+      max_angular_speed: 0.5
+      kp: 1.0
+      ki: 0.05
+      kd: 0.7
+      integral_limit: 1.0
+      wheel_separation: 0.57
+      lookahead_min: 0.5
+      lookahead_max: 0.8
+      lookahead_decay: 0.7
+      target_heading_filter_alpha: 0.8
+      derivative_filter_alpha: 0.2
+      heading_slowdown_angle: 0.5
+      initial_rotate_angle: 0.5
+      approach_distance: 1.0
+      path_direction: 1.0
+      use_final_goal_orientation: true
       transform_tolerance: 0.1
-      use_velocity_scaled_lookahead_dist: false
-      min_approach_linear_velocity: 0.05
-      use_approach_linear_velocity_scaling: true
-      max_allowed_time_to_collision: 1.0
-      use_regulated_linear_velocity_scaling: true
-      use_cost_regulated_linear_velocity_scaling: true
-      regulated_linear_scaling_min_radius: 0.9
-      regulated_linear_scaling_min_speed: 0.25
-      use_rotate_to_heading: true
-      rotate_to_heading_min_angle: 1.2
-      curvature_lookahead_dist: 0.5
-      max_angular_accel: 3.2
-      goal_dist_tol: 0.5
-      cost_scaling_dist: 0.3
-      cost_scaling_gain: 1.0
-      inflation_cost_scaling_factor: 3.0
 
 
     # FollowPath:

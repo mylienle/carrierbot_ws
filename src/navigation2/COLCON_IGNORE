@@ -1,0 +1,2 @@
+# Use the ROS Foxy navigation packages installed under /opt/ros/foxy.
+# The project-owned LOS+PD controller remains in src/carrierbot_navigation.

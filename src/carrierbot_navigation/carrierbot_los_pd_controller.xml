@@ -1,0 +1,7 @@
+<library path="carrierbot_los_pd_controller">
+  <class
+    type="carrierbot_navigation::LosPdController"
+    base_class_type="nav2_core::Controller">
+    <description>Carrierbot custom adaptive LOS guidance with PD heading control.</description>
+  </class>
+</library>
