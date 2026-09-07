@@ -14,7 +14,7 @@ import paho.mqtt.client as mqtt
 import rclpy
 from action_msgs.msg import GoalStatus
 from geometry_msgs.msg import PoseStamped
-from nav2_msgs.action import FollowWaypoints, NavigateToPose
+from nav2_msgs.action import NavigateToPose
 from rclpy.action import ActionClient
 from rclpy.node import Node
 
@@ -29,7 +29,6 @@ from .mqtt_config import (
 )
 
 MQTT_WAYPOINTS_TOPIC = MQTT_TOPICS["waypoints"]
-WATER_INTAKE_TOPIC = MQTT_TOPICS["water_intake"]
 MQTT_ARRIVAL_TOPIC = MQTT_TOPICS["arrival"]
 
 GOAL_COORDINATES = {
@@ -59,7 +58,6 @@ class MQTTGoalSubscriber(Node):
     def __init__(self):
         super().__init__('mqtt_goal_subscriber')
         self.navigate_client = ActionClient(self, NavigateToPose, 'navigate_to_pose')
-        self.waypoints_client = ActionClient(self, FollowWaypoints, 'follow_waypoints')
         self.active_goal_handle = None
         self.mission_id = 0
         self.pending_mission = None
@@ -83,12 +81,8 @@ class MQTTGoalSubscriber(Node):
 
     def on_connect(self, client, _userdata, _flags, rc):
         self.get_logger().info(f'Connected to MQTT broker (rc={rc})')
-        client.subscribe([
-            (MQTT_WAYPOINTS_TOPIC, MQTT_QOS),
-            (WATER_INTAKE_TOPIC, MQTT_QOS),
-        ])
-        self.get_logger().info(
-            f'Subscribed to: {MQTT_WAYPOINTS_TOPIC}, {WATER_INTAKE_TOPIC}')
+        client.subscribe(MQTT_WAYPOINTS_TOPIC, MQTT_QOS)
+        self.get_logger().info(f'Subscribed to: {MQTT_WAYPOINTS_TOPIC}')
 
     def on_subscribe(self, _client, _userdata, mid, _granted_qos):
         self.get_logger().debug(f'MQTT subscription acknowledged (mid={mid})')
@@ -100,10 +94,7 @@ class MQTTGoalSubscriber(Node):
             if msg.topic == MQTT_WAYPOINTS_TOPIC:
                 poses = self.parse_waypoints(payload)
                 if poses:
-                    self.queue_mission('waypoints', poses)
-            else:
-                self.queue_mission(
-                    'goal', self.pose_from_coordinates(GOAL_COORDINATES['WaterIntake']))
+                    self.queue_mission(poses)
         except Exception as error:
             self.get_logger().error(f'MQTT navigation command failed: {error}')
 
@@ -190,80 +181,77 @@ class MQTTGoalSubscriber(Node):
         self.active_goal_handle = None
         return self.mission_id
 
-    def queue_mission(self, mission_type, payload):
+    def queue_mission(self, poses):
         mission_id = self.begin_mission()
-        self.pending_mission = (mission_id, mission_type, payload)
+        self.pending_mission = (mission_id, poses)
         self.get_logger().info(
-            f'Queued MQTT {mission_type} mission; waiting for its Nav2 action server.')
+            f'Queued MQTT mission with {len(poses)} waypoint(s); '
+            'waiting for NavigateToPose.')
 
     def dispatch_pending_mission(self):
         if self.pending_mission is None:
             return
 
-        mission_id, mission_type, payload = self.pending_mission
-        action_client = (
-            self.waypoints_client if mission_type == 'waypoints'
-            else self.navigate_client)
-        if not action_client.server_is_ready():
+        mission_id, poses = self.pending_mission
+        if not self.navigate_client.server_is_ready():
             return
 
         self.pending_mission = None
-        if mission_type == 'waypoints':
-            self.send_waypoints(payload, mission_id)
-        else:
-            self.send_goal(payload, mission_id)
+        self.send_waypoint(poses, mission_id, 0)
 
-    def send_goal(self, pose, mission_id):
+    def send_waypoint(self, poses, mission_id, waypoint_index):
+        pose = poses[waypoint_index]
         goal = NavigateToPose.Goal()
         goal.pose = pose
         future = self.navigate_client.send_goal_async(goal)
         future.add_done_callback(
-            lambda result, identifier=mission_id: self.goal_response(
-                result, identifier, 'NavigateToPose'))
+            lambda result, identifier=mission_id, index=waypoint_index:
+            self.waypoint_goal_response(result, identifier, poses, index))
         self.get_logger().info(
-            f'Sent Nav2-planned goal: ({pose.pose.position.x:.3f}, '
-            f'{pose.pose.position.y:.3f})')
+            f'Sent waypoint {waypoint_index + 1}/{len(poses)}: '
+            f'({pose.pose.position.x:.3f}, {pose.pose.position.y:.3f})')
 
-    def send_waypoints(self, poses, mission_id):
-        goal = FollowWaypoints.Goal()
-        goal.poses = poses
-        future = self.waypoints_client.send_goal_async(goal)
-        future.add_done_callback(
-            lambda result, identifier=mission_id: self.goal_response(
-                result, identifier, 'FollowWaypoints'))
-        self.get_logger().info(
-            f'Sent app-planned mission with {len(poses)} waypoints.')
-
-    def goal_response(self, future, mission_id, action_name):
+    def waypoint_goal_response(self, future, mission_id, poses, waypoint_index):
         try:
             goal_handle = future.result()
         except Exception as error:
-            self.get_logger().error(f'{action_name} request failed: {error}')
+            self.get_logger().error(f'Waypoint request failed: {error}')
             return
         if not goal_handle.accepted:
-            self.get_logger().error(f'{action_name} rejected the mission.')
+            self.get_logger().error(
+                f'Nav2 rejected waypoint {waypoint_index + 1}/{len(poses)}.')
             return
         if mission_id != self.mission_id:
             goal_handle.cancel_goal_async()
             return
 
         self.active_goal_handle = goal_handle
-        self.get_logger().info(f'{action_name} accepted the mission.')
+        self.get_logger().info(
+            f'Nav2 accepted waypoint {waypoint_index + 1}/{len(poses)}.')
         goal_handle.get_result_async().add_done_callback(
-            lambda result, identifier=mission_id: self.result_callback(
-                result, identifier, action_name))
+            lambda result, identifier=mission_id, index=waypoint_index:
+            self.waypoint_result_callback(result, identifier, poses, index))
 
-    def result_callback(self, future, mission_id, action_name):
+    def waypoint_result_callback(self, future, mission_id, poses, waypoint_index):
         if mission_id != self.mission_id:
             return
         try:
             status = future.result().status
-            self.get_logger().info(f'{action_name} finished with status={status}.')
-            if status == GoalStatus.STATUS_SUCCEEDED:
+            self.get_logger().info(
+                f'Waypoint {waypoint_index + 1}/{len(poses)} finished with '
+                f'status={status}.')
+            if status != GoalStatus.STATUS_SUCCEEDED:
+                self.active_goal_handle = None
+                return
+            if waypoint_index + 1 == len(poses):
                 self.publish_arrival()
+                self.active_goal_handle = None
+            else:
+                self.active_goal_handle = None
+                self.send_waypoint(poses, mission_id, waypoint_index + 1)
         except Exception as error:
-            self.get_logger().error(f'{action_name} result failed: {error}')
-        self.active_goal_handle = None
+            self.get_logger().error(f'Waypoint result failed: {error}')
+            self.active_goal_handle = None
 
     def publish_arrival(self):
         result = self.mqttc.publish(
