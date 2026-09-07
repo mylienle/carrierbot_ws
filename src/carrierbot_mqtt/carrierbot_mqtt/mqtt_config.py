@@ -1,6 +1,6 @@
 """Shared MQTT broker, topic, and delivery configuration."""
 
-MQTT_HOST = "45.117.177.157"
+MQTT_HOST = "103.179.190.242"
 MQTT_PORT = 1883
 MQTT_KEEPALIVE_INTERVAL = 5
 MQTT_USERNAME = "client"

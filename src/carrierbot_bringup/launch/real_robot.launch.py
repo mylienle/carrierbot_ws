@@ -215,13 +215,6 @@ def generate_launch_description():
         output="screen",
     )
 
-    mqtt_publisher = Node(
-        package="carrierbot_mqtt",
-        executable="reach_goal",
-        name="reach_goal",
-        output="screen",
-    )
-
     mqtt_rfid = Node(
         package="carrierbot_mqtt",
         executable="rfid_publisher",
@@ -284,7 +277,6 @@ def generate_launch_description():
         TimerAction(period=12.0, actions=[navigation]),
         TimerAction(period=14.0, actions=[rviz]),
         TimerAction(period=14.0, actions=[mqtt_subscriber]),
-        TimerAction(period=14.0, actions=[mqtt_publisher]),
         TimerAction(period=14.0, actions=[mqtt_rfid]),
         TimerAction(period=14.0, actions=[mqtt_location]),
         TimerAction(period=14.0, actions=[mqtt_velocity]),
