@@ -62,6 +62,7 @@ class MQTTGoalSubscriber(Node):
         self.waypoints_client = ActionClient(self, FollowWaypoints, 'follow_waypoints')
         self.active_goal_handle = None
         self.mission_id = 0
+        self.pending_mission = None
 
         self.mqttc = mqtt.Client()
         self.mqttc.username_pw_set(MQTT_USERNAME, MQTT_PASSWORD)
@@ -75,6 +76,7 @@ class MQTTGoalSubscriber(Node):
                 f'Cannot connect to MQTT broker {MQTT_HOST}:{MQTT_PORT}: {error}')
             raise
         self.create_timer(0.1, self.mqtt_loop_callback)
+        self.create_timer(0.2, self.dispatch_pending_mission)
         self.get_logger().info('MQTT Nav2 bridge started.')
         self.get_logger().info(
             f'Robot1-compatible MQTT protocol: movement route={MQTT_WAYPOINTS_TOPIC}')
@@ -98,10 +100,10 @@ class MQTTGoalSubscriber(Node):
             if msg.topic == MQTT_WAYPOINTS_TOPIC:
                 poses = self.parse_waypoints(payload)
                 if poses:
-                    self.send_waypoints(poses)
+                    self.queue_mission('waypoints', poses)
             else:
-                self.send_goal(self.pose_from_coordinates(
-                    GOAL_COORDINATES['WaterIntake']))
+                self.queue_mission(
+                    'goal', self.pose_from_coordinates(GOAL_COORDINATES['WaterIntake']))
         except Exception as error:
             self.get_logger().error(f'MQTT navigation command failed: {error}')
 
@@ -181,17 +183,37 @@ class MQTTGoalSubscriber(Node):
 
     def begin_mission(self):
         self.mission_id += 1
+        self.pending_mission = None
         if self.active_goal_handle is not None:
             self.active_goal_handle.cancel_goal_async()
             self.get_logger().info('Cancelled previous MQTT mission.')
         self.active_goal_handle = None
         return self.mission_id
 
-    def send_goal(self, pose):
+    def queue_mission(self, mission_type, payload):
         mission_id = self.begin_mission()
-        if not self.navigate_client.wait_for_server(timeout_sec=2.0):
-            self.get_logger().error('NavigateToPose action server is unavailable.')
+        self.pending_mission = (mission_id, mission_type, payload)
+        self.get_logger().info(
+            f'Queued MQTT {mission_type} mission; waiting for its Nav2 action server.')
+
+    def dispatch_pending_mission(self):
+        if self.pending_mission is None:
             return
+
+        mission_id, mission_type, payload = self.pending_mission
+        action_client = (
+            self.waypoints_client if mission_type == 'waypoints'
+            else self.navigate_client)
+        if not action_client.server_is_ready():
+            return
+
+        self.pending_mission = None
+        if mission_type == 'waypoints':
+            self.send_waypoints(payload, mission_id)
+        else:
+            self.send_goal(payload, mission_id)
+
+    def send_goal(self, pose, mission_id):
         goal = NavigateToPose.Goal()
         goal.pose = pose
         future = self.navigate_client.send_goal_async(goal)
@@ -202,11 +224,7 @@ class MQTTGoalSubscriber(Node):
             f'Sent Nav2-planned goal: ({pose.pose.position.x:.3f}, '
             f'{pose.pose.position.y:.3f})')
 
-    def send_waypoints(self, poses):
-        mission_id = self.begin_mission()
-        if not self.waypoints_client.wait_for_server(timeout_sec=2.0):
-            self.get_logger().error('FollowWaypoints action server is unavailable.')
-            return
+    def send_waypoints(self, poses, mission_id):
         goal = FollowWaypoints.Goal()
         goal.poses = poses
         future = self.waypoints_client.send_goal_async(goal)
