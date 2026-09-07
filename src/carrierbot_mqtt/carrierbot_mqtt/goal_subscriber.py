@@ -72,30 +72,28 @@ class MQTTGoalSubscriber(Node):
             self.mqttc.connect(MQTT_HOST, MQTT_PORT, MQTT_KEEPALIVE_INTERVAL)
         except Exception as error:
             self.get_logger().error(
-                'Cannot connect to MQTT broker %s:%s: %s',
-                MQTT_HOST, MQTT_PORT, error)
+                f'Cannot connect to MQTT broker {MQTT_HOST}:{MQTT_PORT}: {error}')
             raise
         self.create_timer(0.1, self.mqtt_loop_callback)
         self.get_logger().info('MQTT Nav2 bridge started.')
         self.get_logger().info(
-            'Robot1-compatible MQTT protocol: movement route=%s',
-            MQTT_WAYPOINTS_TOPIC)
+            f'Robot1-compatible MQTT protocol: movement route={MQTT_WAYPOINTS_TOPIC}')
 
     def on_connect(self, client, _userdata, _flags, rc):
-        self.get_logger().info('Connected to MQTT broker (rc=%s)', rc)
+        self.get_logger().info(f'Connected to MQTT broker (rc={rc})')
         client.subscribe([
             (MQTT_WAYPOINTS_TOPIC, MQTT_QOS),
             (WATER_INTAKE_TOPIC, MQTT_QOS),
         ])
         self.get_logger().info(
-            'Subscribed to: %s, %s', MQTT_WAYPOINTS_TOPIC, WATER_INTAKE_TOPIC)
+            f'Subscribed to: {MQTT_WAYPOINTS_TOPIC}, {WATER_INTAKE_TOPIC}')
 
     def on_subscribe(self, _client, _userdata, mid, _granted_qos):
-        self.get_logger().debug('MQTT subscription acknowledged (mid=%s)', mid)
+        self.get_logger().debug(f'MQTT subscription acknowledged (mid={mid})')
 
     def on_message(self, _client, _userdata, msg):
         payload = msg.payload.decode('utf-8').strip()
-        self.get_logger().info('Received MQTT %s: %s', msg.topic, payload)
+        self.get_logger().info(f'Received MQTT {msg.topic}: {payload}')
         try:
             if msg.topic == MQTT_WAYPOINTS_TOPIC:
                 poses = self.parse_waypoints(payload)
@@ -105,7 +103,7 @@ class MQTTGoalSubscriber(Node):
                 self.send_goal(self.pose_from_coordinates(
                     GOAL_COORDINATES['WaterIntake']))
         except Exception as error:
-            self.get_logger().error('MQTT navigation command failed: %s', error)
+            self.get_logger().error(f'MQTT navigation command failed: {error}')
 
     def parse_waypoints(self, raw_payload):
         """Accept the Robot1 list or one-waypoint payload formats."""
@@ -128,12 +126,12 @@ class MQTTGoalSubscriber(Node):
         has_explicit_orientation = []
         for index, waypoint in enumerate(waypoints):
             if not isinstance(waypoint, dict):
-                self.get_logger().warning('Waypoint %d is not an object.', index)
+                self.get_logger().warning(f'Waypoint {index} is not an object.')
                 return None
             pose = self.pose_from_coordinates(waypoint)
             if pose is None:
                 self.get_logger().warning(
-                    'Waypoint %d requires numeric x and y in map meters.', index)
+                    f'Waypoint {index} requires numeric x and y in map meters.')
                 return None
             poses.append(pose)
             has_explicit_orientation.append(
@@ -201,8 +199,8 @@ class MQTTGoalSubscriber(Node):
             lambda result, identifier=mission_id: self.goal_response(
                 result, identifier, 'NavigateToPose'))
         self.get_logger().info(
-            'Sent Nav2-planned goal: (%.3f, %.3f)',
-            pose.pose.position.x, pose.pose.position.y)
+            f'Sent Nav2-planned goal: ({pose.pose.position.x:.3f}, '
+            f'{pose.pose.position.y:.3f})')
 
     def send_waypoints(self, poses):
         mission_id = self.begin_mission()
@@ -216,23 +214,23 @@ class MQTTGoalSubscriber(Node):
             lambda result, identifier=mission_id: self.goal_response(
                 result, identifier, 'FollowWaypoints'))
         self.get_logger().info(
-            'Sent app-planned mission with %d waypoints.', len(poses))
+            f'Sent app-planned mission with {len(poses)} waypoints.')
 
     def goal_response(self, future, mission_id, action_name):
         try:
             goal_handle = future.result()
         except Exception as error:
-            self.get_logger().error('%s request failed: %s', action_name, error)
+            self.get_logger().error(f'{action_name} request failed: {error}')
             return
         if not goal_handle.accepted:
-            self.get_logger().error('%s rejected the mission.', action_name)
+            self.get_logger().error(f'{action_name} rejected the mission.')
             return
         if mission_id != self.mission_id:
             goal_handle.cancel_goal_async()
             return
 
         self.active_goal_handle = goal_handle
-        self.get_logger().info('%s accepted the mission.', action_name)
+        self.get_logger().info(f'{action_name} accepted the mission.')
         goal_handle.get_result_async().add_done_callback(
             lambda result, identifier=mission_id: self.result_callback(
                 result, identifier, action_name))
@@ -242,21 +240,21 @@ class MQTTGoalSubscriber(Node):
             return
         try:
             status = future.result().status
-            self.get_logger().info('%s finished with status=%d.', action_name, status)
+            self.get_logger().info(f'{action_name} finished with status={status}.')
             if status == GoalStatus.STATUS_SUCCEEDED:
                 self.publish_arrival()
         except Exception as error:
-            self.get_logger().error('%s result failed: %s', action_name, error)
+            self.get_logger().error(f'{action_name} result failed: {error}')
         self.active_goal_handle = None
 
     def publish_arrival(self):
         result = self.mqttc.publish(
             MQTT_ARRIVAL_TOPIC, 'true', qos=MQTT_QOS, retain=False)
         if result.rc == mqtt.MQTT_ERR_SUCCESS:
-            self.get_logger().info('Published true to %s', MQTT_ARRIVAL_TOPIC)
+            self.get_logger().info(f'Published true to {MQTT_ARRIVAL_TOPIC}')
         else:
             self.get_logger().error(
-                'MQTT arrival publish failed (rc=%s)', result.rc)
+                f'MQTT arrival publish failed (rc={result.rc})')
 
     def mqtt_loop_callback(self):
         self.mqttc.loop(0.1)
