@@ -118,6 +118,7 @@ void LosPdController::configure(
 void LosPdController::cleanup()
 {
   global_plan_.poses.clear();
+  has_last_goal_ = false;
   resetControllerState();
 }
 
@@ -128,14 +129,22 @@ void LosPdController::activate()
 
 void LosPdController::deactivate()
 {
+  has_last_goal_ = false;
   resetControllerState();
   RCLCPP_INFO(logger_, "Deactivated custom LOS+PID controller");
 }
 
 void LosPdController::setPlan(const nav_msgs::msg::Path & path)
 {
+  const bool same_goal = isSameGoalAsCurrentPlan(path);
   global_plan_ = path;
-  resetControllerState();
+  if (!path.poses.empty()) {
+    last_goal_pose_ = path.poses.back().pose;
+    has_last_goal_ = true;
+  }
+  if (!same_goal) {
+    resetControllerState();
+  }
 }
 
 void LosPdController::resetControllerState()
@@ -146,6 +155,27 @@ void LosPdController::resetControllerState()
   filtered_derivative_ = 0.0;
   previous_target_heading_ = 0.0;
   previous_control_time_ = rclcpp::Time(0, 0, RCL_ROS_TIME);
+}
+
+bool LosPdController::isSameGoalAsCurrentPlan(const nav_msgs::msg::Path & new_path) const
+{
+  constexpr double kSameGoalPositionToleranceM = 0.05;
+  constexpr double kSameGoalYawToleranceRad = 0.05;
+
+  if (!has_last_goal_ || new_path.poses.empty()) {
+    return false;
+  }
+
+  const auto & new_goal = new_path.poses.back().pose;
+  const double dx = new_goal.position.x - last_goal_pose_.position.x;
+  const double dy = new_goal.position.y - last_goal_pose_.position.y;
+  if (std::hypot(dx, dy) > kSameGoalPositionToleranceM) {
+    return false;
+  }
+
+  const double yaw_diff = normalizeAngle(
+    tf2::getYaw(new_goal.orientation) - tf2::getYaw(last_goal_pose_.orientation));
+  return std::fabs(yaw_diff) <= kSameGoalYawToleranceRad;
 }
 
 bool LosPdController::transformPose(

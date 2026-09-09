@@ -41,6 +41,7 @@ private:
   static double clamp(double value, double min_value, double max_value);
   static double normalizeAngle(double angle);
   void resetControllerState();
+  bool isSameGoalAsCurrentPlan(const nav_msgs::msg::Path & new_path) const;
   bool transformPose(
     const std::string & target_frame,
     const geometry_msgs::msg::PoseStamped & input,
@@ -84,6 +85,9 @@ private:
   double filtered_derivative_{0.0};
   double previous_target_heading_{0.0};
   rclcpp::Time previous_control_time_{0, 0, RCL_ROS_TIME};
+
+  bool has_last_goal_{false};
+  geometry_msgs::msg::Pose last_goal_pose_{};
 };
 
 }  // namespace carrierbot_navigation
