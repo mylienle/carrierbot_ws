@@ -13,10 +13,20 @@ import math
 import paho.mqtt.client as mqtt
 import rclpy
 from action_msgs.msg import GoalStatus
-from geometry_msgs.msg import PoseStamped
+from geometry_msgs.msg import PoseStamped, PoseWithCovarianceStamped
 from nav2_msgs.action import NavigateToPose
 from rclpy.action import ActionClient
 from rclpy.node import Node
+
+# The GUI (Reception_Robot_GUI/location.py, plan_path()) always prepends the
+# robot's own current position as the first element of the route it publishes
+# on robot/waypoints: full_plan_points = [current_wp] + plan_points. That
+# element is a location marker for its own logger, not a real destination.
+# Sending it straight to NavigateToPose makes Nav2 try to plan a ~0m path to
+# (functionally) itself, which SmacPlanner2D rejects with "no valid path
+# found" / "Starting point in lethal space!". robot1-ros1's guidance_node.cpp
+# already drops this duplicate; mirror that here.
+DUPLICATE_START_THRESHOLD_M = 0.3
 
 from .mqtt_config import (
     MQTT_HOST,
@@ -61,6 +71,9 @@ class MQTTGoalSubscriber(Node):
         self.active_goal_handle = None
         self.mission_id = 0
         self.pending_mission = None
+        self.current_pose = None
+        self.create_subscription(
+            PoseWithCovarianceStamped, 'amcl_pose', self.amcl_pose_callback, 10)
 
         self.mqttc = mqtt.Client()
         self.mqttc.username_pw_set(MQTT_USERNAME, MQTT_PASSWORD)
@@ -83,6 +96,9 @@ class MQTTGoalSubscriber(Node):
         self.get_logger().info(f'Connected to MQTT broker (rc={rc})')
         client.subscribe(MQTT_WAYPOINTS_TOPIC, MQTT_QOS)
         self.get_logger().info(f'Subscribed to: {MQTT_WAYPOINTS_TOPIC}')
+
+    def amcl_pose_callback(self, msg):
+        self.current_pose = (msg.pose.pose.position.x, msg.pose.pose.position.y)
 
     def on_subscribe(self, _client, _userdata, mid, _granted_qos):
         self.get_logger().debug(f'MQTT subscription acknowledged (mid={mid})')
@@ -115,6 +131,8 @@ class MQTTGoalSubscriber(Node):
                 'robot/waypoints requires a non-empty list of map poses.')
             return None
 
+        waypoints = self.drop_duplicate_start_waypoint(waypoints)
+
         poses = []
         has_explicit_orientation = []
         for index, waypoint in enumerate(waypoints):
@@ -143,6 +161,28 @@ class MQTTGoalSubscriber(Node):
             source = pose.pose.position
             self.set_pose_yaw(pose, math.atan2(target.y - source.y, target.x - source.x))
         return poses
+
+    def drop_duplicate_start_waypoint(self, waypoints):
+        """Drop a leading waypoint that just duplicates the robot's current
+        position (see DUPLICATE_START_THRESHOLD_M comment above)."""
+        if len(waypoints) <= 1 or self.current_pose is None:
+            return waypoints
+        first = waypoints[0]
+        if not isinstance(first, dict):
+            return waypoints
+        try:
+            fx = float(first['x'])
+            fy = float(first['y'])
+        except (KeyError, TypeError, ValueError):
+            return waypoints
+        cx, cy = self.current_pose
+        dist = math.hypot(fx - cx, fy - cy)
+        if dist < DUPLICATE_START_THRESHOLD_M:
+            self.get_logger().warning(
+                f'Dropping first waypoint as duplicate of current position '
+                f'(dist={dist:.3f} m): ({fx:.3f}, {fy:.3f})')
+            return waypoints[1:]
+        return waypoints
 
     def pose_from_coordinates(self, coordinates):
         try:
