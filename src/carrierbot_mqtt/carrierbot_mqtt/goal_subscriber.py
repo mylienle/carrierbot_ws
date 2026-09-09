@@ -18,14 +18,6 @@ from nav2_msgs.action import NavigateToPose
 from rclpy.action import ActionClient
 from rclpy.node import Node
 
-# The GUI (Reception_Robot_GUI/location.py, plan_path()) always prepends the
-# robot's own current position as the first element of the route it publishes
-# on robot/waypoints: full_plan_points = [current_wp] + plan_points. That
-# element is a location marker for its own logger, not a real destination.
-# Sending it straight to NavigateToPose makes Nav2 try to plan a ~0m path to
-# (functionally) itself, which SmacPlanner2D rejects with "no valid path
-# found" / "Starting point in lethal space!". robot1-ros1's guidance_node.cpp
-# already drops this duplicate; mirror that here.
 DUPLICATE_START_THRESHOLD_M = 0.3
 
 from .mqtt_config import (
@@ -163,8 +155,7 @@ class MQTTGoalSubscriber(Node):
         return poses
 
     def drop_duplicate_start_waypoint(self, waypoints):
-        """Drop a leading waypoint that just duplicates the robot's current
-        position (see DUPLICATE_START_THRESHOLD_M comment above)."""
+        """Drop a leading waypoint that just duplicates the robot's current position."""
         if len(waypoints) <= 1 or self.current_pose is None:
             return waypoints
         first = waypoints[0]
