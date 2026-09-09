@@ -7,9 +7,9 @@ bt_navigator:
     odom_topic: /odom
 
     transform_tolerance: 0.5
-    default_server_timeout: 1000
+    default_server_timeout: 5000
     bt_loop_duration: 10
-    wait_for_service_timeout: 1000
+    wait_for_service_timeout: 5000
 
     default_bt_xml_filename: "/home/nvidia/Documents/carrierbot_ws/install/carrierbot_navigation/share/carrierbot_navigation/config/navigate_w_replanning_no_spin.xml"
 
