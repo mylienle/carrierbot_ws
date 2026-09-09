@@ -148,10 +148,14 @@ class MQTTGoalSubscriber(Node):
         for index, pose in enumerate(poses):
             if has_explicit_orientation[index] or len(poses) == 1:
                 continue
-            target_index = index + 1 if index + 1 < len(poses) else index - 1
-            target = poses[target_index].pose.position
             source = pose.pose.position
-            self.set_pose_yaw(pose, math.atan2(target.y - source.y, target.x - source.x))
+            if index + 1 < len(poses):
+                target = poses[index + 1].pose.position
+                dx, dy = target.x - source.x, target.y - source.y
+            else:
+                prev = poses[index - 1].pose.position
+                dx, dy = source.x - prev.x, source.y - prev.y
+            self.set_pose_yaw(pose, math.atan2(dy, dx))
         return poses
 
     def drop_duplicate_start_waypoint(self, waypoints):
