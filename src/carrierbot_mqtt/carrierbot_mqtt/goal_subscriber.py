@@ -149,12 +149,12 @@ class MQTTGoalSubscriber(Node):
             if has_explicit_orientation[index] or len(poses) == 1:
                 continue
             source = pose.pose.position
-            if index + 1 < len(poses):
-                target = poses[index + 1].pose.position
-                dx, dy = target.x - source.x, target.y - source.y
-            else:
+            if index > 0:
                 prev = poses[index - 1].pose.position
                 dx, dy = source.x - prev.x, source.y - prev.y
+            else:
+                target = poses[index + 1].pose.position
+                dx, dy = target.x - source.x, target.y - source.y
             self.set_pose_yaw(pose, math.atan2(dy, dx))
         return poses
 
