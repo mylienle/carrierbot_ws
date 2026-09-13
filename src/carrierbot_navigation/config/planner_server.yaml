@@ -15,7 +15,7 @@ planner_server:
       max_on_approach_iterations: 1000      # maximum number of iterations to attempt to reach goal once in tolerance
       max_planning_time: 2.0                # max time in s for planner to plan, smooth
       cost_travel_multiplier: 0.5           # Minimize cost bias so the planner prefers the shortest valid route instead of hugging the inflation band.
-      use_final_approach_orientation: false   # Whether to set the final path pose at the goal's orientation to the requested orientation (false) or in line with the approach angle so the robot doesn't rotate to heading (true)
+      use_final_approach_orientation: true   # Whether to set the final path pose at the goal's orientation to the requested orientation (false) or in line with the approach angle so the robot doesn't rotate to heading (true)
 
 global_costmap:
   global_costmap:

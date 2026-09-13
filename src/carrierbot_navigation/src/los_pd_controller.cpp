@@ -354,10 +354,16 @@ geometry_msgs::msg::TwistStamped LosPdController::computeVelocityCommands(
   command.twist.linear.x = linear_x;
   command.twist.angular.z = angular_z;
 
-  RCLCPP_DEBUG(
-    logger_,
-    "LOS+PID: segment=%zu goal_distance=%.3f heading_error=%.3f integral=%.3f v=%.3f omega=%.3f",
-    closest_index, remaining_distance, heading_error, integral_error_, linear_x, angular_z);
+  RCLCPP_INFO_THROTTLE(
+    logger_, *clock_, 1000,
+    "LOS: dist=%.3f reached=%d course=%.3f heading=%.3f rotating=%d v=%.3f w=%.3f "
+    "poses=%zu closest=%zu robot=(%.3f,%.3f) goal=(%.3f,%.3f) frame=%s",
+    remaining_distance, static_cast<int>(goal_reached_position), course_error, heading_error,
+    static_cast<int>(rotating_in_place_), linear_x, angular_z,
+    global_plan_.poses.size(), closest_index,
+    robot_in_plan.pose.position.x, robot_in_plan.pose.position.y,
+    global_plan_.poses.back().pose.position.x, global_plan_.poses.back().pose.position.y,
+    global_plan_.header.frame_id.c_str());
   return command;
 }
 

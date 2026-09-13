@@ -46,7 +46,7 @@ controller_server:
       approach_distance: 1.0
       final_align_distance: 0.3
       path_direction: 1.0
-      use_final_goal_orientation: true
+      use_final_goal_orientation: false
       transform_tolerance: 0.1
 
 
