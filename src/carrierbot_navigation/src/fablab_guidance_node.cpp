@@ -56,6 +56,7 @@ public:
     danger_distance_ = declare_parameter<double>("danger_distance", 0.6);
     safety_enabled_ = declare_parameter<bool>("safety_enabled", true);
     pose_topic_ = declare_parameter<std::string>("pose_topic", "/amcl_pose");
+    initial_pose_topic_ = declare_parameter<std::string>("initial_pose_topic", "/initialpose");
     waypoint_topic_ = declare_parameter<std::string>("waypoint_topic", "/fablab_waypoints");
     scan_topic_ = declare_parameter<std::string>("scan_topic", "/scan");
 
@@ -67,6 +68,9 @@ public:
     arrival_publisher_ = create_publisher<std_msgs::msg::Bool>("/fablab_arrival", 10);
     pose_subscription_ = create_subscription<geometry_msgs::msg::PoseWithCovarianceStamped>(
       pose_topic_, 10,
+      std::bind(&FablabGuidanceNode::poseCallback, this, std::placeholders::_1));
+    initial_pose_subscription_ = create_subscription<geometry_msgs::msg::PoseWithCovarianceStamped>(
+      initial_pose_topic_, 10,
       std::bind(&FablabGuidanceNode::poseCallback, this, std::placeholders::_1));
     waypoint_subscription_ = create_subscription<geometry_msgs::msg::PoseStamped>(
       waypoint_topic_, 100,
@@ -97,31 +101,54 @@ private:
     theta_ = std::atan2(
       2.0 * (orientation.w * orientation.z + orientation.x * orientation.y),
       1.0 - 2.0 * (orientation.y * orientation.y + orientation.z * orientation.z));
+    const bool received_first_pose = !has_pose_;
     has_pose_ = true;
+
+    if (received_first_pose && !pending_waypoints_.empty()) {
+      startMissionAtCurrentPose();
+      for (const auto & waypoint : pending_waypoints_) {
+        appendWaypoint(waypoint.first, waypoint.second);
+      }
+      pending_waypoints_.clear();
+    }
   }
 
   void waypointCallback(const geometry_msgs::msg::PoseStamped::SharedPtr message)
   {
-    if (arrival_published_ && !waypoints_.empty()) {
+    if (arrival_published_ && (!waypoints_.empty() || !pending_waypoints_.empty())) {
       RCLCPP_WARN(get_logger(), "New mission received; resetting completed Fablab route");
       waypoints_.clear();
+      pending_waypoints_.clear();
       current_segment_ = 0;
       arrival_published_ = false;
       finished_ = false;
     }
 
-    if (waypoints_.empty()) {
-      if (!has_pose_) {
-        RCLCPP_WARN(get_logger(), "First waypoint arrived before AMCL pose; using current default pose");
-      }
-      waypoints_.emplace_back(x_, y_);
-      current_segment_ = 0;
-      finished_ = false;
-      RCLCPP_INFO(get_logger(), "Added Fablab start waypoint: (%.3f, %.3f)", x_, y_);
-    }
-
     const double waypoint_x = message->pose.position.x;
     const double waypoint_y = message->pose.position.y;
+    if (!has_pose_) {
+      pending_waypoints_.emplace_back(waypoint_x, waypoint_y);
+      RCLCPP_WARN(
+        get_logger(), "Queueing Fablab waypoint until /amcl_pose or /initialpose is available");
+      return;
+    }
+
+    if (waypoints_.empty()) {
+      startMissionAtCurrentPose();
+    }
+    appendWaypoint(waypoint_x, waypoint_y);
+  }
+
+  void startMissionAtCurrentPose()
+  {
+    waypoints_.emplace_back(x_, y_);
+    current_segment_ = 0;
+    finished_ = false;
+    RCLCPP_INFO(get_logger(), "Added Fablab start waypoint: (%.3f, %.3f)", x_, y_);
+  }
+
+  void appendWaypoint(double waypoint_x, double waypoint_y)
+  {
     // The GUI currently includes its current pose as the first route element.
     // The original Fablab node adds that start point itself, so ignore only an
     // exact-near duplicate to prevent a zero-length first segment.
@@ -249,6 +276,10 @@ private:
 
   void controlCallback()
   {
+    if (!has_pose_) {
+      cmd_publisher_->publish(geometry_msgs::msg::Twist());
+      return;
+    }
     updateRoute();
 
     geometry_msgs::msg::Twist command;
@@ -287,13 +318,16 @@ private:
   rclcpp::Time last_pid_time_{0, 0, RCL_ROS_TIME};
   std::size_t current_segment_{0};
   std::string pose_topic_;
+  std::string initial_pose_topic_;
   std::string waypoint_topic_;
   std::string scan_topic_;
   std::vector<std::pair<double, double>> waypoints_;
+  std::vector<std::pair<double, double>> pending_waypoints_;
 
   rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr cmd_publisher_;
   rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr arrival_publisher_;
   rclcpp::Subscription<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr pose_subscription_;
+  rclcpp::Subscription<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr initial_pose_subscription_;
   rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr waypoint_subscription_;
   rclcpp::Subscription<sensor_msgs::msg::LaserScan>::SharedPtr scan_subscription_;
   rclcpp::TimerBase::SharedPtr control_timer_;

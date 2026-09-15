@@ -41,6 +41,15 @@ class LocationPublisher(Node):
             self._amcl_pose_callback,
             10,
         )
+        # AMCL may only publish a pose after its first scan update. Forward the
+        # operator's RViz initial pose as an immediate, safe fallback so the
+        # GUI and direct-waypoint guidance share the same starting coordinate.
+        self.create_subscription(
+            PoseWithCovarianceStamped,
+            "/initialpose",
+            self._amcl_pose_callback,
+            10,
+        )
         self.create_timer(0.5, self._publish_location)
 
         self.mqttc = mqtt.Client()
