@@ -69,7 +69,8 @@ install(
   TARGETS carrierbot_los_pd_controller fablab_guidance_node
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
-  RUNTIME DESTINATION bin
+  # ros2 launch resolves executables from lib/<package>, not bin.
+  RUNTIME DESTINATION lib/${PROJECT_NAME}
 )
 
 install(
