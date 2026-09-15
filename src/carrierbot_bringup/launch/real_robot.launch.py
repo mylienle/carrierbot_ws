@@ -5,7 +5,7 @@ from launch import LaunchDescription
 from launch_ros.actions import Node
 from launch.actions import IncludeLaunchDescription, TimerAction, DeclareLaunchArgument, LogInfo
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import LaunchConfiguration
+from launch.substitutions import LaunchConfiguration, PythonExpression
 from launch.conditions import IfCondition
 
 
@@ -15,6 +15,7 @@ def generate_launch_description():
     use_imu = LaunchConfiguration("use_imu")
     map_file = LaunchConfiguration("map")
     drive_mode = LaunchConfiguration("drive_mode")
+    guidance_mode = LaunchConfiguration("guidance_mode")
     channel_type =  LaunchConfiguration('channel_type', default='serial')
     serial_port = LaunchConfiguration('serial_port')
     lidar_port_default = next(
@@ -58,6 +59,12 @@ def generate_launch_description():
         "drive_mode",
         default_value="1",
         description="Robot 1 CAN drive mode",
+    )
+
+    guidance_mode_arg = DeclareLaunchArgument(
+        "guidance_mode",
+        default_value="nav2",
+        description="Navigation controller: nav2 or fablab_los_pd",
     )
 
     channel_type_arg = DeclareLaunchArgument(
@@ -205,7 +212,29 @@ def generate_launch_description():
             )
         ),
         launch_arguments={"use_sim_time": use_sim_time}.items(),
-        condition=IfCondition(use_amcl)
+        condition=IfCondition(PythonExpression([
+            "'", use_amcl, "' == 'true' and '", guidance_mode, "' == 'nav2'"
+        ]))
+    )
+
+    fablab_guidance = Node(
+        package="carrierbot_navigation",
+        executable="fablab_guidance_node",
+        name="fablab_guidance_node",
+        output="screen",
+        condition=IfCondition(PythonExpression([
+            "'", use_amcl, "' == 'true' and '", guidance_mode, "' == 'fablab_los_pd'"
+        ])),
+    )
+
+    fablab_waypoint_bridge = Node(
+        package="carrierbot_mqtt",
+        executable="fablab_waypoint_bridge",
+        name="fablab_waypoint_bridge",
+        output="screen",
+        condition=IfCondition(PythonExpression([
+            "'", use_amcl, "' == 'true' and '", guidance_mode, "' == 'fablab_los_pd'"
+        ])),
     )
 
     mqtt_subscriber = Node(
@@ -213,6 +242,9 @@ def generate_launch_description():
         executable="goal_subscriber",
         name="mqtt_goal_subscriber",
         output="screen",
+        condition=IfCondition(PythonExpression([
+            "'", use_amcl, "' == 'true' and '", guidance_mode, "' == 'nav2'"
+        ])),
     )
 
     mqtt_rfid = Node(
@@ -257,6 +289,7 @@ def generate_launch_description():
         use_imu_arg,
         map_arg,
         drive_mode_arg,
+        guidance_mode_arg,
         channel_type_arg,
         serial_port_arg,
         lidar_port_log,
@@ -275,6 +308,8 @@ def generate_launch_description():
         TimerAction(period=2.0, actions=[controller]),
         TimerAction(period=4.0, actions=[slam]),
         TimerAction(period=12.0, actions=[navigation]),
+        TimerAction(period=12.0, actions=[fablab_guidance]),
+        TimerAction(period=14.0, actions=[fablab_waypoint_bridge]),
         TimerAction(period=14.0, actions=[rviz]),
         TimerAction(period=14.0, actions=[mqtt_subscriber]),
         TimerAction(period=14.0, actions=[mqtt_rfid]),

@@ -24,6 +24,7 @@ setup(
     entry_points={
         'console_scripts': [
             'goal_subscriber = carrierbot_mqtt.goal_subscriber:main',
+            'fablab_waypoint_bridge = carrierbot_mqtt.fablab_waypoint_bridge:main',
             'reach_goal = carrierbot_mqtt.reach_goal:main',
             'xoay_subscriber = carrierbot_mqtt.xoay_subscriber:main',
             'rfid_publisher = carrierbot_mqtt.rfid_publisher:main',

@@ -23,6 +23,8 @@ find_package(nav2_costmap_2d REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(pluginlib REQUIRED)
 find_package(rclcpp REQUIRED)
+find_package(sensor_msgs REQUIRED)
+find_package(std_msgs REQUIRED)
 find_package(tf2 REQUIRED)
 find_package(tf2_geometry_msgs REQUIRED)
 
@@ -50,10 +52,21 @@ ament_target_dependencies(carrierbot_los_pd_controller
   tf2_geometry_msgs
 )
 
+add_executable(fablab_guidance_node
+  src/fablab_guidance_node.cpp
+)
+
+ament_target_dependencies(fablab_guidance_node
+  geometry_msgs
+  rclcpp
+  sensor_msgs
+  std_msgs
+)
+
 pluginlib_export_plugin_description_file(nav2_core carrierbot_los_pd_controller.xml)
 
 install(
-  TARGETS carrierbot_los_pd_controller
+  TARGETS carrierbot_los_pd_controller fablab_guidance_node
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
   RUNTIME DESTINATION bin
