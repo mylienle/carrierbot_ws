@@ -1,7 +1,12 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstdlib>
+#include <ctime>
+#include <fstream>
 #include <functional>
+#include <iomanip>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -31,6 +36,29 @@ double clamp(double value, double lower, double upper)
 {
   return std::max(lower, std::min(value, upper));
 }
+
+std::string guidanceLogPath()
+{
+  std::ostringstream filename;
+  const auto now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+  std::tm local_time{};
+  localtime_r(&now, &local_time);
+  filename << "guidance_" << std::put_time(&local_time, "%Y%m%d_%H%M%S") << ".csv";
+
+  const char * prefixes = std::getenv("COLCON_PREFIX_PATH");
+  if (prefixes != nullptr) {
+    std::string prefix(prefixes);
+    prefix = prefix.substr(0, prefix.find(':'));
+    const std::string install_suffix = "/install";
+    if (prefix.size() > install_suffix.size() &&
+      prefix.compare(prefix.size() - install_suffix.size(), install_suffix.size(), install_suffix) == 0)
+    {
+      return prefix.substr(0, prefix.size() - install_suffix.size()) +
+             "/src/carrierbot_datalog/data/" + filename.str();
+    }
+  }
+  return "/tmp/" + filename.str();
+}
 }  // namespace
 
 // ROS 2 port of robot_fablab_ws/src/guidance_node/src/guidance_node.cpp.
@@ -53,14 +81,24 @@ public:
     direct_ = declare_parameter<double>("direct", 1.0);
     delta_min_ = declare_parameter<double>("delta_min", 0.5);
     delta_max_ = declare_parameter<double>("delta_max", 0.8);
+    corner_turn_threshold_ = declare_parameter<double>("corner_turn_threshold", 0.35);
+    corner_advance_ = declare_parameter<double>("corner_advance", 0.08);
+    corner_slowdown_distance_ = declare_parameter<double>("corner_slowdown_distance", 0.8);
+    corner_max_speed_ = declare_parameter<double>("corner_max_speed", 0.4);
     danger_distance_ = declare_parameter<double>("danger_distance", 0.6);
     safety_enabled_ = declare_parameter<bool>("safety_enabled", true);
     pose_topic_ = declare_parameter<std::string>("pose_topic", "/amcl_pose");
     initial_pose_topic_ = declare_parameter<std::string>("initial_pose_topic", "/initialpose");
     waypoint_topic_ = declare_parameter<std::string>("waypoint_topic", "/fablab_waypoints");
     scan_topic_ = declare_parameter<std::string>("scan_topic", "/scan");
+    guidance_log_path_ = declare_parameter<std::string>("guidance_log_path", guidanceLogPath());
 
-    if (cycle_seconds_ <= 0.0 || delta_min_ <= 0.0 || delta_max_ < delta_min_) {
+    if (
+      cycle_seconds_ <= 0.0 || goal_radius_ <= 0.0 ||
+      delta_min_ <= 0.0 || delta_max_ < delta_min_ ||
+      corner_turn_threshold_ <= 0.0 || corner_advance_ < 0.0 ||
+      corner_slowdown_distance_ <= 0.0 || corner_max_speed_ <= 0.0)
+    {
       throw std::runtime_error("Invalid Fablab guidance parameters");
     }
 
@@ -85,6 +123,17 @@ public:
       std::chrono::duration_cast<std::chrono::nanoseconds>(
         std::chrono::duration<double>(cycle_seconds_)),
       std::bind(&FablabGuidanceNode::controlCallback, this));
+
+    guidance_log_.open(guidance_log_path_);
+    if (guidance_log_.is_open()) {
+      guidance_log_ <<
+        "time_s,segment,amcl_x,amcl_y,amcl_yaw,start_x,start_y,goal_x,goal_y,"
+        "cross_track,long_track,lookahead,target_heading,heading_error,remaining_distance,"
+        "linear_cmd,angular_cmd,safety_stop,finished\n";
+      RCLCPP_INFO(get_logger(), "Guidance CSV: %s", guidance_log_path_.c_str());
+    } else {
+      RCLCPP_WARN(get_logger(), "Cannot open guidance CSV: %s", guidance_log_path_.c_str());
+    }
 
     RCLCPP_INFO(
       get_logger(),
@@ -221,18 +270,25 @@ private:
       (y_ - previous.second) * std::sin(alpha);
     const double lookahead =
       (delta_max_ - delta_min_) * std::exp(-0.7 * cross_track * cross_track) + delta_min_;
-    const double target_heading = normalizeAngle(alpha + std::atan(-cross_track / lookahead));
-    const double heading_error = normalizeAngle(target_heading - theta_);
+    target_heading_ = normalizeAngle(alpha + std::atan(-cross_track / lookahead));
+    heading_error_ = normalizeAngle(target_heading_ - theta_);
+    start_x_ = previous.first;
+    start_y_ = previous.second;
+    goal_x_ = goal.first;
+    goal_y_ = goal.second;
+    cross_track_ = cross_track;
+    long_track_ = long_track;
+    lookahead_ = lookahead;
 
-    double commanded_angular = clamp(pid(heading_error), -max_angular_speed_, max_angular_speed_);
+    double commanded_angular = clamp(pid(heading_error_), -max_angular_speed_, max_angular_speed_);
     commanded_angular = 0.2 * commanded_angular + 0.8 * angular_z_;
     angular_z_ = commanded_angular;
 
     remaining_distance_ = std::abs(segment_length - long_track);
     const double remaining_ratio = remaining_distance_ / segment_length;
-    if (std::abs(heading_error) > 0.1) {
+    if (std::abs(heading_error_) > 0.1) {
       linear_x_ = clamp(
-        max_linear_speed_ * std::exp(-3.0 * std::abs(heading_error)),
+        max_linear_speed_ * std::exp(-3.0 * std::abs(heading_error_)),
         min_linear_speed_, max_linear_speed_);
     } else {
       linear_x_ = clamp(
@@ -256,7 +312,22 @@ private:
     }
 
     controlLos(waypoints_[current_segment_ + 1], waypoints_[current_segment_]);
-    if (remaining_distance_ <= goal_radius_) {
+    double reach_radius = goal_radius_;
+    if (current_segment_ + 2 < waypoints_.size()) {
+      const auto & current = waypoints_[current_segment_];
+      const auto & goal = waypoints_[current_segment_ + 1];
+      const auto & next = waypoints_[current_segment_ + 2];
+      const double incoming = std::atan2(goal.second - current.second, goal.first - current.first);
+      const double outgoing = std::atan2(next.second - goal.second, next.first - goal.first);
+      if (std::abs(normalizeAngle(outgoing - incoming)) >= corner_turn_threshold_) {
+        reach_radius += corner_advance_;
+        if (remaining_distance_ <= corner_slowdown_distance_) {
+          linear_x_ = std::min(linear_x_, corner_max_speed_);
+        }
+      }
+    }
+    if (remaining_distance_ <= reach_radius)
+    {
       ++current_segment_;
       RCLCPP_INFO(get_logger(), "Reached Fablab waypoint %zu", current_segment_);
       if (current_segment_ + 1 >= waypoints_.size()) {
@@ -288,6 +359,23 @@ private:
       command.angular.z = angular_z_;
     }
     cmd_publisher_->publish(command);
+    writeGuidanceLog(command);
+  }
+
+  void writeGuidanceLog(const geometry_msgs::msg::Twist & command)
+  {
+    if (!guidance_log_.is_open()) {
+      return;
+    }
+    guidance_log_ << std::fixed << std::setprecision(6)
+                  << get_clock()->now().seconds() << ',' << current_segment_ << ','
+                  << x_ << ',' << y_ << ',' << theta_ << ','
+                  << start_x_ << ',' << start_y_ << ',' << goal_x_ << ',' << goal_y_ << ','
+                  << cross_track_ << ',' << long_track_ << ',' << lookahead_ << ','
+                  << target_heading_ << ',' << heading_error_ << ',' << remaining_distance_ << ','
+                  << command.linear.x << ',' << command.angular.z << ','
+                  << safety_stop_ << ',' << finished_ << '\n';
+    guidance_log_.flush();
   }
 
   double linear_speed_{0.6};
@@ -301,6 +389,10 @@ private:
   double direct_{1.0};
   double delta_min_{0.5};
   double delta_max_{0.8};
+  double corner_turn_threshold_{0.35};
+  double corner_advance_{0.08};
+  double corner_slowdown_distance_{0.8};
+  double corner_max_speed_{0.4};
   double danger_distance_{0.6};
   bool safety_enabled_{true};
   bool safety_stop_{false};
@@ -313,14 +405,24 @@ private:
   double linear_x_{0.0};
   double angular_z_{0.0};
   double remaining_distance_{0.0};
+  double heading_error_{0.0};
   double previous_error_{0.0};
   double filtered_derivative_{0.0};
+  double start_x_{0.0};
+  double start_y_{0.0};
+  double goal_x_{0.0};
+  double goal_y_{0.0};
+  double cross_track_{0.0};
+  double long_track_{0.0};
+  double lookahead_{0.0};
+  double target_heading_{0.0};
   rclcpp::Time last_pid_time_{0, 0, RCL_ROS_TIME};
   std::size_t current_segment_{0};
   std::string pose_topic_;
   std::string initial_pose_topic_;
   std::string waypoint_topic_;
   std::string scan_topic_;
+  std::string guidance_log_path_;
   std::vector<std::pair<double, double>> waypoints_;
   std::vector<std::pair<double, double>> pending_waypoints_;
 
@@ -331,6 +433,7 @@ private:
   rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr waypoint_subscription_;
   rclcpp::Subscription<sensor_msgs::msg::LaserScan>::SharedPtr scan_subscription_;
   rclcpp::TimerBase::SharedPtr control_timer_;
+  std::ofstream guidance_log_;
 };
 
 int main(int argc, char * argv[])

@@ -14,7 +14,16 @@ from carrierbot_msgs.msg import CarrierbotTelemetry
 
 def make_default_csv_path():
     timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
-    log_dir = '/home/nvidia/carrierbot_ws/src/carrierbot_datalog/data'
+    prefixes = os.environ.get('COLCON_PREFIX_PATH', '').split(os.pathsep)
+    workspace_root = next(
+        (os.path.dirname(prefix) for prefix in prefixes
+         if os.path.isdir(os.path.join(os.path.dirname(prefix), 'src', 'carrierbot_datalog'))),
+        None,
+    )
+    log_dir = (
+        os.path.join(workspace_root, 'src', 'carrierbot_datalog', 'data')
+        if workspace_root else os.path.expanduser('~/.ros/carrierbot_logs')
+    )
     return os.path.join(log_dir, f'amcl_odom_log_{timestamp}.csv')
 
 
