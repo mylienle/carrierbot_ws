@@ -82,9 +82,11 @@ public:
     delta_min_ = declare_parameter<double>("delta_min", 0.5);
     delta_max_ = declare_parameter<double>("delta_max", 0.8);
     corner_turn_threshold_ = declare_parameter<double>("corner_turn_threshold", 0.35);
-    corner_advance_ = declare_parameter<double>("corner_advance", 0.08);
+    corner_advance_ = declare_parameter<double>("corner_advance", 0.0);
     corner_slowdown_distance_ = declare_parameter<double>("corner_slowdown_distance", 0.8);
     corner_max_speed_ = declare_parameter<double>("corner_max_speed", 0.4);
+    turn_heading_threshold_ = declare_parameter<double>("turn_heading_threshold", 0.7);
+    turn_heading_max_speed_ = declare_parameter<double>("turn_heading_max_speed", 0.18);
     danger_distance_ = declare_parameter<double>("danger_distance", 0.6);
     safety_enabled_ = declare_parameter<bool>("safety_enabled", true);
     pose_topic_ = declare_parameter<std::string>("pose_topic", "/amcl_pose");
@@ -97,7 +99,8 @@ public:
       cycle_seconds_ <= 0.0 || goal_radius_ <= 0.0 ||
       delta_min_ <= 0.0 || delta_max_ < delta_min_ ||
       corner_turn_threshold_ <= 0.0 || corner_advance_ < 0.0 ||
-      corner_slowdown_distance_ <= 0.0 || corner_max_speed_ <= 0.0)
+      corner_slowdown_distance_ <= 0.0 || corner_max_speed_ <= 0.0 ||
+      turn_heading_threshold_ <= 0.0 || turn_heading_max_speed_ <= 0.0)
     {
       throw std::runtime_error("Invalid Fablab guidance parameters");
     }
@@ -294,6 +297,9 @@ private:
       linear_x_ = clamp(
         linear_speed_ * remaining_ratio, min_linear_speed_, max_linear_speed_);
     }
+    if (std::abs(heading_error_) >= turn_heading_threshold_) {
+      linear_x_ = std::min(linear_x_, turn_heading_max_speed_);
+    }
   }
 
   void updateRoute()
@@ -390,9 +396,11 @@ private:
   double delta_min_{0.5};
   double delta_max_{0.8};
   double corner_turn_threshold_{0.35};
-  double corner_advance_{0.08};
+  double corner_advance_{0.0};
   double corner_slowdown_distance_{0.8};
   double corner_max_speed_{0.4};
+  double turn_heading_threshold_{0.7};
+  double turn_heading_max_speed_{0.18};
   double danger_distance_{0.6};
   bool safety_enabled_{true};
   bool safety_stop_{false};
