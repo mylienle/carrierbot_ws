@@ -84,7 +84,7 @@ public:
     corner_turn_threshold_ = declare_parameter<double>("corner_turn_threshold", 0.35);
     corner_advance_ = declare_parameter<double>("corner_advance", 0.0);
     corner_slowdown_distance_ = declare_parameter<double>("corner_slowdown_distance", 0.8);
-    corner_max_speed_ = declare_parameter<double>("corner_max_speed", 0.4);
+    corner_max_speed_ = declare_parameter<double>("corner_max_speed", 0.35);
     turn_heading_threshold_ = declare_parameter<double>("turn_heading_threshold", 0.7);
     turn_heading_max_speed_ = declare_parameter<double>("turn_heading_max_speed", 0.18);
     danger_distance_ = declare_parameter<double>("danger_distance", 0.6);
@@ -398,7 +398,7 @@ private:
   double corner_turn_threshold_{0.35};
   double corner_advance_{0.0};
   double corner_slowdown_distance_{0.8};
-  double corner_max_speed_{0.4};
+  double corner_max_speed_{0.35};
   double turn_heading_threshold_{0.7};
   double turn_heading_max_speed_{0.18};
   double danger_distance_{0.6};
