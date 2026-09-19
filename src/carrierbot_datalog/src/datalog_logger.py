@@ -51,8 +51,10 @@ class DataLogger(Node):
         self.amcl_qw = None
         self.filtered_vx = None
         self.filtered_wz = None
-        self.left_velocity = None
-        self.right_velocity = None
+        self.left_command_mps = None
+        self.right_command_mps = None
+        self.left_measured_mps = None
+        self.right_measured_mps = None
         self.left_rps = None
         self.right_rps = None
         self.voltage = None
@@ -76,10 +78,12 @@ class DataLogger(Node):
                 'amcl_qw',
                 'filtered_vx',
                 'filtered_wz',
-                'left_velocity_cmd',
-                'right_velocity_cmd',
-                'left_velocity_encoder',
-                'right_velocity_encoder',
+                'left_command_mps',
+                'right_command_mps',
+                'left_measured_mps',
+                'right_measured_mps',
+                'left_encoder_rps',
+                'right_encoder_rps',
                 'voltage',
             ])
             self.csv_file.flush()
@@ -125,8 +129,10 @@ class DataLogger(Node):
         self.filtered_wz = twist.angular.z
 
     def telemetry_callback(self, msg):
-        self.left_velocity = msg.left_velocity
-        self.right_velocity = msg.right_velocity
+        self.left_command_mps = msg.left_command_mps
+        self.right_command_mps = msg.right_command_mps
+        self.left_measured_mps = msg.left_measured_mps
+        self.right_measured_mps = msg.right_measured_mps
         self.left_rps = msg.left_rps
         self.right_rps = msg.right_rps
         self.voltage = msg.voltage
@@ -140,8 +146,10 @@ class DataLogger(Node):
             format_value(self.amcl_qw),
             format_value(self.filtered_vx),
             format_value(self.filtered_wz),
-            format_value(self.left_velocity),
-            format_value(self.right_velocity),
+            format_value(self.left_command_mps),
+            format_value(self.right_command_mps),
+            format_value(self.left_measured_mps),
+            format_value(self.right_measured_mps),
             format_value(self.left_rps),
             format_value(self.right_rps),
             format_value(self.voltage),

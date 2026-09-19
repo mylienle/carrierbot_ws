@@ -2,4 +2,8 @@ float32 left_velocity
 float32 right_velocity
 float32 left_rps
 float32 right_rps
+float32 left_command_mps
+float32 right_command_mps
+float32 left_measured_mps
+float32 right_measured_mps
 float32 voltage

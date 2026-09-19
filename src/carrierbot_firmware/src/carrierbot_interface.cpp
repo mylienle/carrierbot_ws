@@ -378,6 +378,8 @@ namespace carrierbot_firmware
             telemetry_msg_.right_rps = static_cast<float>(right_rad_s / (2.0 * kPi));
             telemetry_msg_.left_velocity = static_cast<float>(left_mps);
             telemetry_msg_.right_velocity = static_cast<float>(right_mps);
+            telemetry_msg_.left_measured_mps = static_cast<float>(left_mps);
+            telemetry_msg_.right_measured_mps = static_cast<float>(right_mps);
         }
 
         position_state_[0] += velocity_state_[0] * dt;
@@ -424,6 +426,8 @@ namespace carrierbot_firmware
             std::lock_guard<std::mutex> lock(state_mutex_);
             telemetry_msg_.left_velocity = static_cast<float>(left_mps);
             telemetry_msg_.right_velocity = static_cast<float>(right_mps);
+            telemetry_msg_.left_command_mps = static_cast<float>(left_mps);
+            telemetry_msg_.right_command_mps = static_cast<float>(right_mps);
         }
         publishTelemetry();
 
