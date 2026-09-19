@@ -87,6 +87,9 @@ public:
     corner_max_speed_ = declare_parameter<double>("corner_max_speed", 0.35);
     turn_heading_threshold_ = declare_parameter<double>("turn_heading_threshold", 0.7);
     turn_heading_max_speed_ = declare_parameter<double>("turn_heading_max_speed", 0.18);
+    start_alignment_threshold_ = declare_parameter<double>("start_alignment_threshold", 0.35);
+    start_alignment_tolerance_ = declare_parameter<double>("start_alignment_tolerance", 0.20);
+    start_alignment_angular_speed_ = declare_parameter<double>("start_alignment_angular_speed", 0.25);
     danger_distance_ = declare_parameter<double>("danger_distance", 0.6);
     safety_enabled_ = declare_parameter<bool>("safety_enabled", true);
     pose_topic_ = declare_parameter<std::string>("pose_topic", "/amcl_pose");
@@ -100,7 +103,10 @@ public:
       delta_min_ <= 0.0 || delta_max_ < delta_min_ ||
       corner_turn_threshold_ <= 0.0 || corner_advance_ < 0.0 ||
       corner_slowdown_distance_ <= 0.0 || corner_max_speed_ <= 0.0 ||
-      turn_heading_threshold_ <= 0.0 || turn_heading_max_speed_ <= 0.0)
+      turn_heading_threshold_ <= 0.0 || turn_heading_max_speed_ <= 0.0 ||
+      start_alignment_tolerance_ <= 0.0 ||
+      start_alignment_threshold_ < start_alignment_tolerance_ ||
+      start_alignment_angular_speed_ <= 0.0)
     {
       throw std::runtime_error("Invalid Fablab guidance parameters");
     }
@@ -196,6 +202,8 @@ private:
     waypoints_.emplace_back(x_, y_);
     current_segment_ = 0;
     finished_ = false;
+    start_alignment_pending_ = true;
+    start_alignment_active_ = false;
     RCLCPP_INFO(get_logger(), "Added Fablab start waypoint: (%.3f, %.3f)", x_, y_);
   }
 
@@ -317,7 +325,36 @@ private:
       return;
     }
 
-    controlLos(waypoints_[current_segment_ + 1], waypoints_[current_segment_]);
+    const auto & previous = waypoints_[current_segment_];
+    const auto & goal = waypoints_[current_segment_ + 1];
+    if (start_alignment_pending_ && std::hypot(goal.first - x_, goal.second - y_) > goal_radius_) {
+      target_heading_ = std::atan2(goal.second - y_, goal.first - x_);
+      heading_error_ = normalizeAngle(target_heading_ - theta_);
+      start_x_ = previous.first;
+      start_y_ = previous.second;
+      goal_x_ = goal.first;
+      goal_y_ = goal.second;
+      remaining_distance_ = std::hypot(goal.first - x_, goal.second - y_);
+      if (!start_alignment_active_ && std::abs(heading_error_) > start_alignment_threshold_) {
+        start_alignment_active_ = true;
+      }
+      if (start_alignment_active_) {
+        if (std::abs(heading_error_) <= start_alignment_tolerance_) {
+          start_alignment_active_ = false;
+          start_alignment_pending_ = false;
+        } else {
+          linear_x_ = 0.0;
+          angular_z_ = clamp(
+            angular_speed_ * heading_error_,
+            -start_alignment_angular_speed_, start_alignment_angular_speed_);
+          return;
+        }
+      } else {
+        start_alignment_pending_ = false;
+      }
+    }
+
+    controlLos(goal, previous);
     double reach_radius = goal_radius_;
     if (current_segment_ + 2 < waypoints_.size()) {
       const auto & current = waypoints_[current_segment_];
@@ -401,11 +438,16 @@ private:
   double corner_max_speed_{0.35};
   double turn_heading_threshold_{0.7};
   double turn_heading_max_speed_{0.18};
+  double start_alignment_threshold_{0.35};
+  double start_alignment_tolerance_{0.20};
+  double start_alignment_angular_speed_{0.25};
   double danger_distance_{0.6};
   bool safety_enabled_{true};
   bool safety_stop_{false};
   bool has_pose_{false};
   bool finished_{false};
+  bool start_alignment_pending_{false};
+  bool start_alignment_active_{false};
   bool arrival_published_{false};
   double x_{0.0};
   double y_{0.0};
