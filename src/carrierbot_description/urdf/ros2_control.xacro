@@ -10,7 +10,7 @@
 
             <xacro:unless value="$(arg is_ignition)">
                 <hardware> 
-                <plugin>gz_ros2_control/GazeboSimSystem</plugin> 
+                <plugin>gazebo_ros2_control/GazeboSystem</plugin> 
                 </hardware>
             </xacro:unless>
         </xacro:if>

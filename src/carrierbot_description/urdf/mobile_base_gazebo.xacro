@@ -27,7 +27,7 @@
         </xacro:if>
 
         <xacro:unless value="$(arg is_ignition)">
-            <plugin filename="gz_ros2_control-system" name="gz_ros2_control::GazeboSimROS2ControlPlugin">
+            <plugin filename="libgazebo_ros2_control.so" name="gazebo_ros2_control">
                 <parameters>$(find carrierbot_controller)/config/controller.yaml</parameters>
             </plugin>  
         </xacro:unless>

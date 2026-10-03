@@ -24,8 +24,8 @@ def generate_launch_description():
     )
     world_arg = DeclareLaunchArgument(
         'world',
-        default_value='empty.sdf',
-        description='Gazebo world. The default keeps the B1 behavioral test obstacle-free.',
+        default_value='empty.world',
+        description='Gazebo Classic world. The default keeps the B1 behavioral test obstacle-free.',
     )
     mqtt_enabled_arg = DeclareLaunchArgument(
         'mqtt_enabled',
