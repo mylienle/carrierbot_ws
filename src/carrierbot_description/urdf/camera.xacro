@@ -92,10 +92,12 @@
                     filename="libgazebo_ros_camera.so">
 
                     <ros>
-                        <remapping>~/image_raw:=/rgb/image_raw</remapping>
-                        <remapping>~/camera_info:=/rgb/camera_info</remapping>
-                        <remapping>~/image_depth:=/depth/image_raw</remapping>
-                        <remapping>~/camera_info_depth:=/depth/camera_info</remapping>
+                        <!-- GazeboRosCamera resolves these from camera_name, not
+                             from the plugin's private (~) namespace. -->
+                        <remapping>rgbd/image_raw:=/rgb/image_raw</remapping>
+                        <remapping>rgbd/camera_info:=/rgb/camera_info</remapping>
+                        <remapping>rgbd/depth/image_raw:=/depth/image_raw</remapping>
+                        <remapping>rgbd/depth/camera_info:=/depth/camera_info</remapping>
                     </ros>
 
                     <camera_name>rgbd</camera_name>
