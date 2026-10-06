@@ -5,6 +5,8 @@
     <xacro:property name="camera_height" value="0.05" />
     <xacro:property name="camera_length" value="0.01" />
     <xacro:property name="camera_width" value="0.10" />
+    <!-- Measured from base_footprint; refine after measuring the physical mount. -->
+    <xacro:property name="camera_mount_height" value="1.10" />
 
     <!-- Physical camera link -->
     <link name="camera_link">
@@ -30,12 +32,12 @@
             rpy="0 0 0" />
     </link>
 
-    <!-- Mount camera on robot -->
+    <!-- Mount the camera above the front display, facing forward. -->
     <joint name="base_camera_joint" type="fixed">
         <parent link="base_link" />
         <child link="camera_link" />
         <origin
-            xyz="${(base_length + camera_length) / 2.0} 0 ${base_height / 2.0}"
+            xyz="${(base_length + camera_length) / 2.0} 0 ${camera_mount_height - wheel_radius}"
             rpy="0 0 0" />
     </joint>
 
@@ -65,12 +67,12 @@
         <gazebo reference="camera_link">
             <material>Gazebo/Red</material>
 
-            <sensor name="rgb_camera" type="camera">
+            <sensor name="rgbd_camera" type="depth">
                 <always_on>true</always_on>
-                <visualize>true</visualize>
+                <visualize>false</visualize>
                 <update_rate>15.0</update_rate>
 
-                <camera name="rgb_camera">
+                <camera name="rgbd_camera">
                     <horizontal_fov>1.047</horizontal_fov>
 
                     <image>
@@ -86,57 +88,20 @@
                 </camera>
 
                 <plugin
-                    name="rgb_camera_controller"
+                    name="rgbd_camera_controller"
                     filename="libgazebo_ros_camera.so">
 
                     <ros>
                         <remapping>~/image_raw:=/rgb/image_raw</remapping>
                         <remapping>~/camera_info:=/rgb/camera_info</remapping>
-                    </ros>
-
-                    <camera_name>rgb</camera_name>
-                    <frame_name>camera_rgb_optical_frame</frame_name>
-
-                </plugin>
-            </sensor>
-
-
-            <!-- Depth camera -->
-            <sensor name="depth_camera" type="depth">
-                <always_on>true</always_on>
-                <visualize>true</visualize>
-                <update_rate>15.0</update_rate>
-
-                <camera name="depth_camera">
-                    <horizontal_fov>1.047</horizontal_fov>
-
-                    <image>
-                        <width>640</width>
-                        <height>480</height>
-                        <format>R8G8B8</format>
-                    </image>
-
-                    <clip>
-                        <near>0.1</near>
-                        <far>20.0</far>
-                    </clip>
-                </camera>
-
-                <plugin
-                    name="depth_camera_controller"
-                    filename="libgazebo_ros_camera.so">
-
-                    <ros>
                         <remapping>~/image_depth:=/depth/image_raw</remapping>
                         <remapping>~/camera_info_depth:=/depth/camera_info</remapping>
                     </ros>
 
-                    <camera_name>depth</camera_name>
-                    <frame_name>camera_depth_optical_frame</frame_name>
-
+                    <camera_name>rgbd</camera_name>
+                    <frame_name>camera_rgb_optical_frame</frame_name>
                     <min_depth>0.1</min_depth>
                     <max_depth>20.0</max_depth>
-
                 </plugin>
             </sensor>
 

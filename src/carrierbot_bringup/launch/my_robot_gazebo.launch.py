@@ -21,11 +21,13 @@ def generate_launch_description():
     my_robot_description_dir = get_package_share_directory("carrierbot_description")
     my_robot_bringup_dir = get_package_share_directory("carrierbot_bringup")
     robot_controller_dir = get_package_share_directory("carrierbot_controller")
+    carrierbot_slam_dir = get_package_share_directory("carrierbot_slam")
     gazebo_ros_dir = get_package_share_directory("gazebo_ros")
     
     # File paths
     urdf_path = os.path.join(my_robot_description_dir, "urdf", "my_robot.urdf.xacro")
     rviz_config_path = os.path.join(my_robot_description_dir, "rviz", "urdf_config.rviz")
+    ekf_config_path = os.path.join(carrierbot_slam_dir, "config", "ekf.yaml")
 
     # Robot State Publisher
     robot_state_publisher_node = Node(
@@ -39,7 +41,8 @@ def generate_launch_description():
                     ' is_ignition:=False',
                 ]),
                 value_type=str,
-            )
+            ),
+            'use_sim_time': True,
         }]
     )
 
@@ -69,7 +72,8 @@ def generate_launch_description():
         package="rviz2",
         executable="rviz2",
         arguments=["-d", rviz_config_path],
-        output="screen"
+        parameters=[{'use_sim_time': True}],
+        output="screen",
     )
     
     # Include Controller Launch File (delayed to ensure robot is spawned first)
@@ -85,6 +89,22 @@ def generate_launch_description():
         period=5.0,
         actions=[controller_launch]
     )
+
+    # Fuse simulated wheel odometry and IMU. The EKF is the only publisher of
+    # odom -> base_footprint because controller_sim.yaml disables that TF.
+    delayed_ekf = TimerAction(
+        period=6.0,
+        actions=[Node(
+            package="robot_localization",
+            executable="ekf_node",
+            name="ekf_filter_node",
+            parameters=[
+                ekf_config_path,
+                {"use_sim_time": True, "publish_tf": True},
+            ],
+            output="screen",
+        )],
+    )
     
     return LaunchDescription([
         world_arg,
@@ -93,4 +113,5 @@ def generate_launch_description():
         spawn_robot_node,
         rviz_node,
         delayed_controller_launch,
+        delayed_ekf,
     ])

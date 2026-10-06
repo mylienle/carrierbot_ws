@@ -36,6 +36,12 @@ install(PROGRAMS
   RENAME laser_filter
 )
 
+install(PROGRAMS
+  ${PROJECT_NAME}/save_occupancy_grid.py
+  DESTINATION lib/${PROJECT_NAME}
+  RENAME save_occupancy_grid
+)
+
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
   ament_lint_auto_find_test_dependencies()
