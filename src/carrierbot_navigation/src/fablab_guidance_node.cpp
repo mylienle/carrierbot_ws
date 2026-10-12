@@ -87,6 +87,10 @@ public:
     corner_max_speed_ = declare_parameter<double>("corner_max_speed", 0.35);
     turn_heading_threshold_ = declare_parameter<double>("turn_heading_threshold", 0.35);
     turn_heading_max_speed_ = declare_parameter<double>("turn_heading_max_speed", 0.18);
+    // Final waypoint: stop closer than the intermediate switch radius, approaching slowly
+    final_goal_radius_ = declare_parameter<double>("final_goal_radius", 0.15);
+    final_slowdown_distance_ = declare_parameter<double>("final_slowdown_distance", 0.6);
+    final_max_speed_ = declare_parameter<double>("final_max_speed", 0.2);
     start_alignment_threshold_ = declare_parameter<double>("start_alignment_threshold", 0.35);
     start_alignment_tolerance_ = declare_parameter<double>("start_alignment_tolerance", 0.20);
     start_alignment_angular_speed_ = declare_parameter<double>("start_alignment_angular_speed", 0.25);
@@ -104,6 +108,7 @@ public:
       corner_turn_threshold_ <= 0.0 || corner_advance_ < 0.0 ||
       corner_slowdown_distance_ <= 0.0 || corner_max_speed_ <= 0.0 ||
       turn_heading_threshold_ <= 0.0 || turn_heading_max_speed_ <= 0.0 ||
+      final_goal_radius_ <= 0.0 || final_slowdown_distance_ <= 0.0 || final_max_speed_ <= 0.0 ||
       start_alignment_tolerance_ <= 0.0 ||
       start_alignment_threshold_ < start_alignment_tolerance_ ||
       start_alignment_angular_speed_ <= 0.0)
@@ -368,6 +373,11 @@ private:
           linear_x_ = std::min(linear_x_, corner_max_speed_);
         }
       }
+    } else {
+      reach_radius = final_goal_radius_;
+      if (remaining_distance_ <= final_slowdown_distance_) {
+        linear_x_ = std::min(linear_x_, final_max_speed_);
+      }
     }
     if (remaining_distance_ <= reach_radius)
     {
@@ -438,6 +448,9 @@ private:
   double corner_max_speed_{0.35};
   double turn_heading_threshold_{0.35};
   double turn_heading_max_speed_{0.18};
+  double final_goal_radius_{0.15};
+  double final_slowdown_distance_{0.6};
+  double final_max_speed_{0.2};
   double start_alignment_threshold_{0.35};
   double start_alignment_tolerance_{0.20};
   double start_alignment_angular_speed_{0.25};
