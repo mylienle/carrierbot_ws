@@ -363,7 +363,7 @@ namespace carrierbot_firmware
         }
 
         // v1 updateWheelOdometry scale: v_l = -left/20, v_r = right/20 (m/s)
-        const double left_mps = -convertVelocityFromPulse(left_pulse) / kVelocityScale;
+        const double left_mps = convertVelocityFromPulse(left_pulse) / kVelocityScale;
         const double right_mps = convertVelocityFromPulse(right_pulse) / kVelocityScale;
 
         const double left_rad_s = left_mps / kWheelRadiusM;
@@ -406,7 +406,7 @@ namespace carrierbot_firmware
         }
 
         // rad/s -> m/s, then apply v1 ×20 before pulse conversion
-        const double left_mps = -left_cmd_rad_s * kWheelRadiusM;
+        const double left_mps = left_cmd_rad_s * kWheelRadiusM;
         const double right_mps = right_cmd_rad_s * kWheelRadiusM;
         const int left_pulse = convertPulse(left_mps * kVelocityScale);
         const int right_pulse = convertPulse(right_mps * kVelocityScale);
