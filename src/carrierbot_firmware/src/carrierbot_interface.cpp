@@ -10,6 +10,9 @@
 
 namespace carrierbot_firmware
 {
+    constexpr double CarrierbotInterface::kEncoderTimeoutSec;
+    constexpr double CarrierbotInterface::kStreamRetrySec;
+
     CarrierbotInterface::CarrierbotInterface() = default;
 
     CarrierbotInterface::~CarrierbotInterface()
