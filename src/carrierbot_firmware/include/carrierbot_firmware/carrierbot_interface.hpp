@@ -84,9 +84,11 @@ namespace carrierbot_firmware
         // Raw encoder pulses/s from CAN 0x011 (before ÷20 scale)
         int raw_left_pulse_s_{0};
         int raw_right_pulse_s_{0};
+        int encoder_frame_count_{0};  // 0x011 frames since last rate log
         std::chrono::steady_clock::time_point last_encoder_time_{};
         std::chrono::steady_clock::time_point last_stream_request_time_{};
-        static constexpr double kEncoderTimeoutSec = 0.2;
+        std::chrono::steady_clock::time_point last_rate_log_time_{};
+        static constexpr double kEncoderTimeoutSec = 0.5;
         static constexpr double kStreamRetrySec = 1.0;
         float voltage_{0.0f};
 

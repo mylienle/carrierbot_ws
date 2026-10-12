@@ -303,6 +303,7 @@ namespace carrierbot_firmware
         std::lock_guard<std::mutex> lock(state_mutex_);
         raw_left_pulse_s_ = left_pulse;
         raw_right_pulse_s_ = right_pulse;
+        ++encoder_frame_count_;
         last_encoder_time_ = std::chrono::steady_clock::now();
     }
 
@@ -367,10 +368,11 @@ namespace carrierbot_firmware
         int right_pulse = 0;
         const auto steady_now = std::chrono::steady_clock::now();
         bool encoder_stale = false;
+        double encoder_age_sec = 0.0;
         {
             std::lock_guard<std::mutex> lock(state_mutex_);
-            encoder_stale = steady_now - last_encoder_time_ >
-                            std::chrono::duration<double>(kEncoderTimeoutSec);
+            encoder_age_sec = std::chrono::duration<double>(steady_now - last_encoder_time_).count();
+            encoder_stale = encoder_age_sec > kEncoderTimeoutSec;
             if (!encoder_stale)
             {
                 left_pulse = raw_left_pulse_s_;
@@ -387,12 +389,35 @@ namespace carrierbot_firmware
                 1000,
                 "No CAN 0x011 encoder frame for > %.2f s; wheel velocity set to 0",
                 kEncoderTimeoutSec);
-            // Stream may have been toggled off (STM reset, missed frame): toggle it back on
-            if (steady_now - last_stream_request_time_ >
+            // Stream may have been toggled off (STM reset): toggle it back on only after a
+            // long silence, a short gap while streaming would otherwise toggle it OFF
+            if (encoder_age_sec > kStreamRetrySec &&
+                steady_now - last_stream_request_time_ >
                 std::chrono::duration<double>(kStreamRetrySec))
             {
                 requestEncoderStream();
             }
+        }
+
+        // Diagnostic: actual 0x011 stream rate every 5 s
+        const double rate_window_sec =
+            std::chrono::duration<double>(steady_now - last_rate_log_time_).count();
+        if (rate_window_sec >= 5.0)
+        {
+            int frames = 0;
+            {
+                std::lock_guard<std::mutex> lock(state_mutex_);
+                frames = encoder_frame_count_;
+                encoder_frame_count_ = 0;
+            }
+            if (rate_window_sec < 10.0)
+            {
+                RCLCPP_INFO(
+                    rclcpp::get_logger("CarrierbotInterface"),
+                    "CAN 0x011 encoder rate: %.1f Hz (L=%d R=%d pulse/s)",
+                    frames / rate_window_sec, left_pulse, right_pulse);
+            }
+            last_rate_log_time_ = steady_now;
         }
 
         // v1 updateWheelOdometry scale: v_l = -left/20, v_r = right/20 (m/s)
