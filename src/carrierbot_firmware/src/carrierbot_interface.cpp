@@ -192,32 +192,37 @@ namespace carrierbot_firmware
             return;
         }
         poll_running_ = true;
-        poll_thread_ = std::thread([this]() {
-            using namespace std::chrono_literals;
-            while (poll_running_)
-            {
-                try
-                {
-                    sendCan(0x050, {1, 0, 0, 0, 0, 0, 0, 0});
-                }
-                catch (const std::exception &e)
-                {
-                    RCLCPP_WARN_STREAM(
-                        rclcpp::get_logger("CarrierbotInterface"),
-                        "CAN poll 0x050 failed: " << e.what());
-                }
-                std::this_thread::sleep_for(
-                    std::chrono::duration<double>(poll_period_sec_));
-            }
-        });
+        {
+            std::lock_guard<std::mutex> lock(state_mutex_);
+            // Grace period before the first 0x011 frame is expected
+            last_encoder_time_ = std::chrono::steady_clock::now();
+        }
+        requestEncoderStream();
     }
 
     void CarrierbotInterface::stopPollLoop()
     {
-        poll_running_ = false;
-        if (poll_thread_.joinable())
+        if (!poll_running_)
         {
-            poll_thread_.join();
+            return;
+        }
+        poll_running_ = false;
+        // STM toggles the 0x011 stream on each 0x050: send once more to stop it
+        requestEncoderStream();
+    }
+
+    void CarrierbotInterface::requestEncoderStream()
+    {
+        last_stream_request_time_ = std::chrono::steady_clock::now();
+        try
+        {
+            sendCan(0x050, {1, 0, 0, 0, 0, 0, 0, 0});
+        }
+        catch (const std::exception &e)
+        {
+            RCLCPP_WARN_STREAM(
+                rclcpp::get_logger("CarrierbotInterface"),
+                "CAN 0x050 encoder stream toggle failed: " << e.what());
         }
     }
 
@@ -295,6 +300,7 @@ namespace carrierbot_firmware
         std::lock_guard<std::mutex> lock(state_mutex_);
         raw_left_pulse_s_ = left_pulse;
         raw_right_pulse_s_ = right_pulse;
+        last_encoder_time_ = std::chrono::steady_clock::now();
     }
 
     void CarrierbotInterface::handleRfidData(const std::vector<uint8_t> &data)
@@ -356,10 +362,34 @@ namespace carrierbot_firmware
 
         int left_pulse = 0;
         int right_pulse = 0;
+        const auto steady_now = std::chrono::steady_clock::now();
+        bool encoder_stale = false;
         {
             std::lock_guard<std::mutex> lock(state_mutex_);
-            left_pulse = raw_left_pulse_s_;
-            right_pulse = raw_right_pulse_s_;
+            encoder_stale = steady_now - last_encoder_time_ >
+                            std::chrono::duration<double>(kEncoderTimeoutSec);
+            if (!encoder_stale)
+            {
+                left_pulse = raw_left_pulse_s_;
+                right_pulse = raw_right_pulse_s_;
+            }
+        }
+
+        // Never integrate a held 0x011 value: if the stream stops, report zero velocity
+        if (encoder_stale && poll_running_)
+        {
+            RCLCPP_WARN_THROTTLE(
+                rclcpp::get_logger("CarrierbotInterface"),
+                *ros_node_->get_clock(),
+                1000,
+                "No CAN 0x011 encoder frame for > %.2f s; wheel velocity set to 0",
+                kEncoderTimeoutSec);
+            // Stream may have been toggled off (STM reset, missed frame): toggle it back on
+            if (steady_now - last_stream_request_time_ >
+                std::chrono::duration<double>(kStreamRetrySec))
+            {
+                requestEncoderStream();
+            }
         }
 
         // v1 updateWheelOdometry scale: v_l = -left/20, v_r = right/20 (m/s)

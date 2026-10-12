@@ -13,6 +13,7 @@
 #include <mutex>
 #include <thread>
 #include <atomic>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <functional>
@@ -61,6 +62,7 @@ namespace carrierbot_firmware
         void sendCan(uint16_t can_id, const std::vector<uint8_t> &data);
         void startPollLoop();
         void stopPollLoop();
+        void requestEncoderStream();
 
         static int convertPulse(double velocity_mps);
         static double convertVelocityFromPulse(int pulse);
@@ -82,6 +84,10 @@ namespace carrierbot_firmware
         // Raw encoder pulses/s from CAN 0x011 (before ÷20 scale)
         int raw_left_pulse_s_{0};
         int raw_right_pulse_s_{0};
+        std::chrono::steady_clock::time_point last_encoder_time_{};
+        std::chrono::steady_clock::time_point last_stream_request_time_{};
+        static constexpr double kEncoderTimeoutSec = 0.2;
+        static constexpr double kStreamRetrySec = 1.0;
         float voltage_{0.0f};
 
         rclcpp::Node::SharedPtr ros_node_;
