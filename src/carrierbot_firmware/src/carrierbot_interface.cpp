@@ -10,9 +10,6 @@
 
 namespace carrierbot_firmware
 {
-    constexpr double CarrierbotInterface::kEncoderTimeoutSec;
-    constexpr double CarrierbotInterface::kStreamRetrySec;
-
     CarrierbotInterface::CarrierbotInterface() = default;
 
     CarrierbotInterface::~CarrierbotInterface()
@@ -195,37 +192,32 @@ namespace carrierbot_firmware
             return;
         }
         poll_running_ = true;
-        {
-            std::lock_guard<std::mutex> lock(state_mutex_);
-            // Grace period before the first 0x011 frame is expected
-            last_encoder_time_ = std::chrono::steady_clock::now();
-        }
-        requestEncoderStream();
+        poll_thread_ = std::thread([this]() {
+            using namespace std::chrono_literals;
+            while (poll_running_)
+            {
+                try
+                {
+                    sendCan(0x050, {1, 0, 0, 0, 0, 0, 0, 0});
+                }
+                catch (const std::exception &e)
+                {
+                    RCLCPP_WARN_STREAM(
+                        rclcpp::get_logger("CarrierbotInterface"),
+                        "CAN poll 0x050 failed: " << e.what());
+                }
+                std::this_thread::sleep_for(
+                    std::chrono::duration<double>(poll_period_sec_));
+            }
+        });
     }
 
     void CarrierbotInterface::stopPollLoop()
     {
-        if (!poll_running_)
-        {
-            return;
-        }
         poll_running_ = false;
-        // STM toggles the 0x011 stream on each 0x050: send once more to stop it
-        requestEncoderStream();
-    }
-
-    void CarrierbotInterface::requestEncoderStream()
-    {
-        last_stream_request_time_ = std::chrono::steady_clock::now();
-        try
+        if (poll_thread_.joinable())
         {
-            sendCan(0x050, {1, 0, 0, 0, 0, 0, 0, 0});
-        }
-        catch (const std::exception &e)
-        {
-            RCLCPP_WARN_STREAM(
-                rclcpp::get_logger("CarrierbotInterface"),
-                "CAN 0x050 encoder stream toggle failed: " << e.what());
+            poll_thread_.join();
         }
     }
 
@@ -303,8 +295,6 @@ namespace carrierbot_firmware
         std::lock_guard<std::mutex> lock(state_mutex_);
         raw_left_pulse_s_ = left_pulse;
         raw_right_pulse_s_ = right_pulse;
-        ++encoder_frame_count_;
-        last_encoder_time_ = std::chrono::steady_clock::now();
     }
 
     void CarrierbotInterface::handleRfidData(const std::vector<uint8_t> &data)
@@ -366,58 +356,10 @@ namespace carrierbot_firmware
 
         int left_pulse = 0;
         int right_pulse = 0;
-        const auto steady_now = std::chrono::steady_clock::now();
-        bool encoder_stale = false;
-        double encoder_age_sec = 0.0;
         {
             std::lock_guard<std::mutex> lock(state_mutex_);
-            encoder_age_sec = std::chrono::duration<double>(steady_now - last_encoder_time_).count();
-            encoder_stale = encoder_age_sec > kEncoderTimeoutSec;
-            if (!encoder_stale)
-            {
-                left_pulse = raw_left_pulse_s_;
-                right_pulse = raw_right_pulse_s_;
-            }
-        }
-
-        // Never integrate a held 0x011 value: if the stream stops, report zero velocity
-        if (encoder_stale && poll_running_)
-        {
-            RCLCPP_WARN_THROTTLE(
-                rclcpp::get_logger("CarrierbotInterface"),
-                *ros_node_->get_clock(),
-                1000,
-                "No CAN 0x011 encoder frame for > %.2f s; wheel velocity set to 0",
-                kEncoderTimeoutSec);
-            // Stream may have been toggled off (STM reset): toggle it back on only after a
-            // long silence, a short gap while streaming would otherwise toggle it OFF
-            if (encoder_age_sec > kStreamRetrySec &&
-                steady_now - last_stream_request_time_ >
-                std::chrono::duration<double>(kStreamRetrySec))
-            {
-                requestEncoderStream();
-            }
-        }
-
-        // Diagnostic: actual 0x011 stream rate every 5 s
-        const double rate_window_sec =
-            std::chrono::duration<double>(steady_now - last_rate_log_time_).count();
-        if (rate_window_sec >= 5.0)
-        {
-            int frames = 0;
-            {
-                std::lock_guard<std::mutex> lock(state_mutex_);
-                frames = encoder_frame_count_;
-                encoder_frame_count_ = 0;
-            }
-            if (rate_window_sec < 10.0)
-            {
-                RCLCPP_INFO(
-                    rclcpp::get_logger("CarrierbotInterface"),
-                    "CAN 0x011 encoder rate: %.1f Hz (L=%d R=%d pulse/s)",
-                    frames / rate_window_sec, left_pulse, right_pulse);
-            }
-            last_rate_log_time_ = steady_now;
+            left_pulse = raw_left_pulse_s_;
+            right_pulse = raw_right_pulse_s_;
         }
 
         // v1 updateWheelOdometry scale: v_l = -left/20, v_r = right/20 (m/s)
