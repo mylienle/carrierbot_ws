@@ -409,8 +409,11 @@ private:
 
     geometry_msgs::msg::Twist command;
     if (!finished_ && !safety_stop_) {
-      // Wheels saturate at ~0.31 m/s: keep v + |w|*L/2 below it so turning is not clipped
-      command.linear.x = std::min(linear_x_, std::max(0.0, 0.31 - std::abs(angular_z_) * 0.57 / 2.0));
+      // Wheels saturate at ~0.31 m/s: keep v + |w|*L/2 below it so turning is not clipped,
+      // and v >= |w|*L/2 so the inner wheel never reverses (jerk at corners)
+      const double half_turn = std::abs(angular_z_) * 0.57 / 2.0;
+      command.linear.x = linear_x_ > 0.0 ?
+        std::max(half_turn, std::min(linear_x_, 0.31 - half_turn)) : linear_x_;
       command.angular.z = angular_z_;
     }
     cmd_publisher_->publish(command);
