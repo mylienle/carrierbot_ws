@@ -18,6 +18,8 @@
 #include "rclcpp/rclcpp.hpp"
 #include "sensor_msgs/msg/laser_scan.hpp"
 #include "std_msgs/msg/bool.hpp"
+#include "tf2_ros/buffer.h"
+#include "tf2_ros/transform_listener.h"
 
 namespace
 {
@@ -117,6 +119,8 @@ public:
       throw std::runtime_error("Invalid Fablab guidance parameters");
     }
 
+    tf_buffer_ = std::make_shared<tf2_ros::Buffer>(get_clock());
+    tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
     cmd_publisher_ = create_publisher<geometry_msgs::msg::Twist>("/cmd_vel", 10);
     arrival_publisher_ = create_publisher<std_msgs::msg::Bool>("/fablab_arrival", 10);
     pose_subscription_ = create_subscription<geometry_msgs::msg::PoseWithCovarianceStamped>(
@@ -409,6 +413,16 @@ private:
       cmd_publisher_->publish(geometry_msgs::msg::Twist());
       return;
     }
+    // /amcl_pose only updates ~2.5 Hz and jumps; use map->base_footprint TF
+    // (AMCL + odometry) every cycle for a smooth pose, keep /amcl_pose if TF fails
+    try {
+      const auto transform = tf_buffer_->lookupTransform("map", "base_footprint", tf2::TimePointZero);
+      x_ = transform.transform.translation.x;
+      y_ = transform.transform.translation.y;
+      const auto & q = transform.transform.rotation;
+      theta_ = std::atan2(2.0 * (q.w * q.z + q.x * q.y), 1.0 - 2.0 * (q.y * q.y + q.z * q.z));
+    } catch (const tf2::TransformException &) {
+    }
     updateRoute();
 
     geometry_msgs::msg::Twist command;
@@ -507,6 +521,8 @@ private:
   rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr waypoint_subscription_;
   rclcpp::Subscription<sensor_msgs::msg::LaserScan>::SharedPtr scan_subscription_;
   rclcpp::TimerBase::SharedPtr control_timer_;
+  std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
+  std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
   std::ofstream guidance_log_;
 };
 
