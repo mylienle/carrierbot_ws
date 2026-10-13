@@ -81,6 +81,7 @@ public:
     direct_ = declare_parameter<double>("direct", 1.0);
     delta_min_ = declare_parameter<double>("delta_min", 0.5);
     delta_max_ = declare_parameter<double>("delta_max", 0.8);
+    lookahead_gamma_ = declare_parameter<double>("lookahead_gamma", 0.2);
     corner_turn_threshold_ = declare_parameter<double>("corner_turn_threshold", 0.35);
     corner_advance_ = declare_parameter<double>("corner_advance", 0.0);
     corner_slowdown_distance_ = declare_parameter<double>("corner_slowdown_distance", 0.8);
@@ -104,7 +105,7 @@ public:
 
     if (
       cycle_seconds_ <= 0.0 || goal_radius_ <= 0.0 ||
-      delta_min_ <= 0.0 || delta_max_ < delta_min_ ||
+      delta_min_ <= 0.0 || delta_max_ < delta_min_ || lookahead_gamma_ < 0.0 ||
       corner_turn_threshold_ <= 0.0 || corner_advance_ < 0.0 ||
       corner_slowdown_distance_ <= 0.0 || corner_max_speed_ <= 0.0 ||
       turn_heading_threshold_ <= 0.0 || turn_heading_max_speed_ <= 0.0 ||
@@ -285,7 +286,7 @@ private:
       (x_ - previous.first) * std::cos(alpha) +
       (y_ - previous.second) * std::sin(alpha);
     const double lookahead =
-      (delta_max_ - delta_min_) * std::exp(-0.7 * cross_track * cross_track) + delta_min_;
+      (delta_max_ - delta_min_) * std::exp(-lookahead_gamma_ * std::abs(cross_track)) + delta_min_;
     target_heading_ = normalizeAngle(alpha + std::atan(-cross_track / lookahead));
     heading_error_ = normalizeAngle(target_heading_ - theta_);
     start_x_ = previous.first;
@@ -442,6 +443,7 @@ private:
   double direct_{1.0};
   double delta_min_{0.5};
   double delta_max_{0.8};
+  double lookahead_gamma_{0.2};
   double corner_turn_threshold_{0.35};
   double corner_advance_{0.0};
   double corner_slowdown_distance_{0.8};
