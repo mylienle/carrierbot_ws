@@ -265,7 +265,7 @@ private:
     // KD is the derivative coefficient.
     previous_error_ = error;
     last_pid_time_ = now;
-    if (std::abs(error) < turn_heading_threshold_) {
+    if (std::abs(error) < 0.05) {
       integral_ = clamp(integral_ + 0.1 * cycle_seconds_ * error, -0.1, 0.1);
     }
     return angular_speed_ * error + kd_ * filtered_derivative_ + integral_;
