@@ -210,6 +210,7 @@ private:
     finished_ = false;
     start_alignment_pending_ = true;
     start_alignment_active_ = false;
+    integral_ = 0.0;
     RCLCPP_INFO(get_logger(), "Added Fablab start waypoint: (%.3f, %.3f)", x_, y_);
   }
 
@@ -260,7 +261,10 @@ private:
     // KD is the derivative coefficient.
     previous_error_ = error;
     last_pid_time_ = now;
-    return angular_speed_ * error + kd_ * filtered_derivative_;
+    if (std::abs(error) < turn_heading_threshold_) {
+      integral_ = clamp(integral_ + 0.1 * cycle_seconds_ * error, -0.1, 0.1);
+    }
+    return angular_speed_ * error + kd_ * filtered_derivative_ + integral_;
   }
 
   void controlLos(
@@ -477,6 +481,7 @@ private:
   double heading_error_{0.0};
   double previous_error_{0.0};
   double filtered_derivative_{0.0};
+  double integral_{0.0};
   double start_x_{0.0};
   double start_y_{0.0};
   double goal_x_{0.0};
