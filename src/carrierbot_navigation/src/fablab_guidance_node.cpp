@@ -239,24 +239,14 @@ private:
   void scanCallback(const sensor_msgs::msg::LaserScan::SharedPtr message)
   {
     int danger_count = 0;
-    int close_count = 0;
     for (const float range : message->ranges) {
       if (std::isfinite(range) && range >= 0.5F && range <= danger_distance_) {
         ++danger_count;
-      } else if (std::isfinite(range) && range > message->range_min && range < 0.5F) {
-        ++close_count;
+        if (danger_count >= 30) {
+          safety_stop_ = true;
+          return;
+        }
       }
-    }
-    if (danger_count >= 30) {
-      if (!safety_stop_) {
-        close_count_at_stop_ = close_count;
-      }
-      safety_stop_ = true;
-      return;
-    }
-    // Obstacle moved inside 0.5 m (no longer in the band): stay stopped
-    if (safety_stop_ && close_count >= close_count_at_stop_ + 30) {
-      return;
     }
     safety_stop_ = false;
   }
@@ -491,7 +481,6 @@ private:
   double danger_distance_{0.6};
   bool safety_enabled_{true};
   bool safety_stop_{false};
-  int close_count_at_stop_{0};
   bool has_pose_{false};
   bool finished_{false};
   bool start_alignment_pending_{false};
