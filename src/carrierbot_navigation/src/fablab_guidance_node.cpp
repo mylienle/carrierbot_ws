@@ -239,7 +239,14 @@ private:
   void scanCallback(const sensor_msgs::msg::LaserScan::SharedPtr message)
   {
     int danger_count = 0;
-    for (const float range : message->ranges) {
+    for (std::size_t i = 0; i < message->ranges.size(); ++i) {
+      const float range = message->ranges[i];
+      // Only +-45 deg ahead (laser is mounted rotated by pi, so forward = laser angle pi);
+      // side walls in narrow corridors (e.g. B2 wp3) must not stop the robot
+      const double angle = message->angle_min + i * message->angle_increment;
+      if (std::abs(normalizeAngle(angle - kPi)) > 0.785) {
+        continue;
+      }
       if (std::isfinite(range) && range >= 0.5F && range <= danger_distance_) {
         ++danger_count;
         if (danger_count >= 30) {
