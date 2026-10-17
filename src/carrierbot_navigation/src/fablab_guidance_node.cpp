@@ -344,11 +344,40 @@ private:
       return;
     }
 
+    const auto & previous = waypoints_[current_segment_];
     const auto & goal = waypoints_[current_segment_ + 1];
-    controlLos(goal, waypoints_[current_segment_]);
+    if (start_alignment_pending_ && std::hypot(goal.first - x_, goal.second - y_) > goal_radius_) {
+      target_heading_ = std::atan2(goal.second - y_, goal.first - x_);
+      heading_error_ = normalizeAngle(target_heading_ - theta_);
+      start_x_ = previous.first;
+      start_y_ = previous.second;
+      goal_x_ = goal.first;
+      goal_y_ = goal.second;
+      remaining_distance_ = std::hypot(goal.first - x_, goal.second - y_);
+      if (!start_alignment_active_ && std::abs(heading_error_) > start_alignment_threshold_) {
+        start_alignment_active_ = true;
+      }
+      if (start_alignment_active_) {
+        if (std::abs(heading_error_) <= start_alignment_tolerance_) {
+          start_alignment_active_ = false;
+          start_alignment_pending_ = false;
+        } else {
+          linear_x_ = 0.0;
+          angular_z_ = clamp(
+            angular_speed_ * heading_error_,
+            -start_alignment_angular_speed_, start_alignment_angular_speed_);
+          return;
+        }
+      } else {
+        start_alignment_pending_ = false;
+      }
+    }
+
+    controlLos(goal, previous);
     double reach_radius = goal_radius_;
     if (current_segment_ + 2 < waypoints_.size()) {
       const auto & current = waypoints_[current_segment_];
+      const auto & goal = waypoints_[current_segment_ + 1];
       const auto & next = waypoints_[current_segment_ + 2];
       const double incoming = std::atan2(goal.second - current.second, goal.first - current.first);
       const double outgoing = std::atan2(next.second - goal.second, next.first - goal.first);
@@ -364,28 +393,7 @@ private:
         linear_x_ = std::min(linear_x_, final_max_speed_);
       }
     }
-    const bool is_final_home =
-      current_segment_ + 2 == waypoints_.size() &&
-      std::hypot(goal.first - home_x_, goal.second - home_y_) < 0.05;
-    bool reached_goal = remaining_distance_ <= reach_radius;
-    if (is_final_home) {
-      const double home_distance = std::hypot(goal.first - x_, goal.second - y_);
-      if (home_distance > home_position_tolerance_) {
-        reached_goal = false;
-      } else {
-        const double home_heading_error = normalizeAngle(home_heading_ - theta_);
-        linear_x_ = 0.0;
-        angular_z_ = clamp(
-          angular_speed_ * home_heading_error,
-          -home_alignment_angular_speed_, home_alignment_angular_speed_);
-        if (std::abs(home_heading_error) > home_heading_tolerance_) {
-          return;
-        }
-        angular_z_ = 0.0;
-        reached_goal = true;
-      }
-    }
-    if (reached_goal)
+    if (remaining_distance_ <= reach_radius)
     {
       ++current_segment_;
       RCLCPP_INFO(get_logger(), "Reached Fablab waypoint %zu", current_segment_);
@@ -480,11 +488,12 @@ private:
   bool safety_stop_{false};
   bool has_pose_{false};
   bool finished_{false};
+  bool start_alignment_pending_{false};
+  bool start_alignment_active_{false};
   bool arrival_published_{false};
   double x_{0.0};
   double y_{0.0};
   double theta_{0.0};
-  double home_heading_{0.0};
   double linear_x_{0.0};
   double angular_z_{0.0};
   double remaining_distance_{0.0};
