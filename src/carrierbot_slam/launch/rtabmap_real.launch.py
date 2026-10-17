@@ -52,7 +52,18 @@ def generate_launch_description():
             "approx_sync": "true",
             "wait_imu_to_init": "false",
             "database_path": LaunchConfiguration("database_path"),
-            "rtabmap_args": "--delete_db_on_start --Grid/FromDepth true",
+            # Refine every odometry link and loop closure with ICP on the LiDAR scan
+            # (wheel/EKF heading drifts), keep the graph planar, and build the 2D
+            # grid from the LiDAR instead of the noisy USB2 stereo depth.
+            "rtabmap_args": (
+                "--delete_db_on_start"
+                " --Reg/Strategy 1"
+                " --Reg/Force3DoF true"
+                " --RGBD/NeighborLinkRefining true"
+                " --Icp/VoxelSize 0.05"
+                " --Icp/MaxCorrespondenceDistance 0.1"
+                " --Grid/Sensor 0"
+            ),
             "rtabmap_viz": LaunchConfiguration("rtabmap_viz"),
             "rviz": "false",
         }.items(),
