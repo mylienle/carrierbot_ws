@@ -18,6 +18,8 @@
 #include "rclcpp/rclcpp.hpp"
 #include "sensor_msgs/msg/laser_scan.hpp"
 #include "std_msgs/msg/bool.hpp"
+#include "tf2_ros/buffer.h"
+#include "tf2_ros/transform_listener.h"
 
 namespace
 {
@@ -81,17 +83,20 @@ public:
     direct_ = declare_parameter<double>("direct", 1.0);
     delta_min_ = declare_parameter<double>("delta_min", 0.5);
     delta_max_ = declare_parameter<double>("delta_max", 0.8);
+    lookahead_gamma_ = declare_parameter<double>("lookahead_gamma", 0.2);
     corner_turn_threshold_ = declare_parameter<double>("corner_turn_threshold", 0.35);
     corner_advance_ = declare_parameter<double>("corner_advance", 0.0);
     corner_slowdown_distance_ = declare_parameter<double>("corner_slowdown_distance", 0.8);
-    corner_max_speed_ = declare_parameter<double>("corner_max_speed", 0.18);
-    turn_heading_threshold_ = declare_parameter<double>("turn_heading_threshold", 0.7);
+    corner_max_speed_ = declare_parameter<double>("corner_max_speed", 0.35);
+    turn_heading_threshold_ = declare_parameter<double>("turn_heading_threshold", 0.35);
     turn_heading_max_speed_ = declare_parameter<double>("turn_heading_max_speed", 0.18);
-    home_x_ = declare_parameter<double>("home_x", 18.028);
-    home_y_ = declare_parameter<double>("home_y", 20.952);
-    home_position_tolerance_ = declare_parameter<double>("home_position_tolerance", 0.10);
-    home_heading_tolerance_ = declare_parameter<double>("home_heading_tolerance", 0.10);
-    home_alignment_angular_speed_ = declare_parameter<double>("home_alignment_angular_speed", 0.25);
+    // Final waypoint: stop closer than the intermediate switch radius, approaching slowly
+    final_goal_radius_ = declare_parameter<double>("final_goal_radius", 0.15);
+    final_slowdown_distance_ = declare_parameter<double>("final_slowdown_distance", 0.6);
+    final_max_speed_ = declare_parameter<double>("final_max_speed", 0.2);
+    start_alignment_threshold_ = declare_parameter<double>("start_alignment_threshold", 0.35);
+    start_alignment_tolerance_ = declare_parameter<double>("start_alignment_tolerance", 0.20);
+    start_alignment_angular_speed_ = declare_parameter<double>("start_alignment_angular_speed", 0.25);
     danger_distance_ = declare_parameter<double>("danger_distance", 0.6);
     safety_enabled_ = declare_parameter<bool>("safety_enabled", true);
     pose_topic_ = declare_parameter<std::string>("pose_topic", "/amcl_pose");
@@ -102,16 +107,20 @@ public:
 
     if (
       cycle_seconds_ <= 0.0 || goal_radius_ <= 0.0 ||
-      delta_min_ <= 0.0 || delta_max_ < delta_min_ ||
+      delta_min_ <= 0.0 || delta_max_ < delta_min_ || lookahead_gamma_ < 0.0 ||
       corner_turn_threshold_ <= 0.0 || corner_advance_ < 0.0 ||
       corner_slowdown_distance_ <= 0.0 || corner_max_speed_ <= 0.0 ||
       turn_heading_threshold_ <= 0.0 || turn_heading_max_speed_ <= 0.0 ||
-      home_position_tolerance_ <= 0.0 || home_heading_tolerance_ <= 0.0 ||
-      home_alignment_angular_speed_ <= 0.0)
+      final_goal_radius_ <= 0.0 || final_slowdown_distance_ <= 0.0 || final_max_speed_ <= 0.0 ||
+      start_alignment_tolerance_ <= 0.0 ||
+      start_alignment_threshold_ < start_alignment_tolerance_ ||
+      start_alignment_angular_speed_ <= 0.0)
     {
       throw std::runtime_error("Invalid Fablab guidance parameters");
     }
 
+    tf_buffer_ = std::make_shared<tf2_ros::Buffer>(get_clock());
+    tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
     cmd_publisher_ = create_publisher<geometry_msgs::msg::Twist>("/cmd_vel", 10);
     arrival_publisher_ = create_publisher<std_msgs::msg::Bool>("/fablab_arrival", 10);
     pose_subscription_ = create_subscription<geometry_msgs::msg::PoseWithCovarianceStamped>(
@@ -203,9 +212,9 @@ private:
     waypoints_.emplace_back(x_, y_);
     current_segment_ = 0;
     finished_ = false;
-    if (std::hypot(x_ - home_x_, y_ - home_y_) <= goal_radius_) {
-      home_heading_ = theta_;
-    }
+    start_alignment_pending_ = true;
+    start_alignment_active_ = false;
+    integral_ = 0.0;
     RCLCPP_INFO(get_logger(), "Added Fablab start waypoint: (%.3f, %.3f)", x_, y_);
   }
 
@@ -230,7 +239,12 @@ private:
   void scanCallback(const sensor_msgs::msg::LaserScan::SharedPtr message)
   {
     int danger_count = 0;
-    for (const float range : message->ranges) {
+    for (std::size_t i = 0; i < message->ranges.size(); ++i) {
+      const float range = message->ranges[i];
+      const double angle = message->angle_min + i * message->angle_increment;
+      if (std::abs(normalizeAngle(angle - kPi)) > kPi / 2.0) {
+        continue;
+      }
       if (std::isfinite(range) && range >= 0.5F && range <= danger_distance_) {
         ++danger_count;
         if (danger_count >= 30) {
@@ -256,7 +270,10 @@ private:
     // KD is the derivative coefficient.
     previous_error_ = error;
     last_pid_time_ = now;
-    return angular_speed_ * error + kd_ * filtered_derivative_;
+    if (std::abs(error) < 0.05) {
+      integral_ = clamp(integral_ + 0.1 * cycle_seconds_ * error, -0.1, 0.1);
+    }
+    return angular_speed_ * error + kd_ * filtered_derivative_ + integral_;
   }
 
   void controlLos(
@@ -282,7 +299,7 @@ private:
       (x_ - previous.first) * std::cos(alpha) +
       (y_ - previous.second) * std::sin(alpha);
     const double lookahead =
-      (delta_max_ - delta_min_) * std::exp(-0.7 * cross_track * cross_track) + delta_min_;
+      (delta_max_ - delta_min_) * std::exp(-lookahead_gamma_ * std::abs(cross_track)) + delta_min_;
     target_heading_ = normalizeAngle(alpha + std::atan(-cross_track / lookahead));
     heading_error_ = normalizeAngle(target_heading_ - theta_);
     start_x_ = previous.first;
@@ -341,6 +358,11 @@ private:
           linear_x_ = std::min(linear_x_, corner_max_speed_);
         }
       }
+    } else {
+      reach_radius = final_goal_radius_;
+      if (remaining_distance_ <= final_slowdown_distance_) {
+        linear_x_ = std::min(linear_x_, final_max_speed_);
+      }
     }
     const bool is_final_home =
       current_segment_ + 2 == waypoints_.size() &&
@@ -388,11 +410,25 @@ private:
       cmd_publisher_->publish(geometry_msgs::msg::Twist());
       return;
     }
+    // /amcl_pose only updates ~2.5 Hz and jumps; use map->base_footprint TF
+    // (AMCL + odometry) every cycle for a smooth pose, keep /amcl_pose if TF fails
+    try {
+      const auto transform = tf_buffer_->lookupTransform("map", "base_footprint", tf2::TimePointZero);
+      x_ = transform.transform.translation.x;
+      y_ = transform.transform.translation.y;
+      const auto & q = transform.transform.rotation;
+      theta_ = std::atan2(2.0 * (q.w * q.z + q.x * q.y), 1.0 - 2.0 * (q.y * q.y + q.z * q.z));
+    } catch (const tf2::TransformException &) {
+    }
     updateRoute();
 
     geometry_msgs::msg::Twist command;
     if (!finished_ && !safety_stop_) {
-      command.linear.x = linear_x_;
+      // Driver wheel limit is 0.9 m/s: keep v + |w|*L/2 below it so turning is not clipped,
+      // and v >= |w|*L/2 so the inner wheel never reverses (jerk at corners)
+      const double half_turn = std::abs(angular_z_) * 0.57 / 2.0;
+      command.linear.x = linear_x_ > 0.0 ?
+        std::max(half_turn, std::min(linear_x_, 0.9 - half_turn)) : linear_x_;
       command.angular.z = angular_z_;
     }
     cmd_publisher_->publish(command);
@@ -426,17 +462,19 @@ private:
   double direct_{1.0};
   double delta_min_{0.5};
   double delta_max_{0.8};
+  double lookahead_gamma_{0.2};
   double corner_turn_threshold_{0.35};
   double corner_advance_{0.0};
   double corner_slowdown_distance_{0.8};
   double corner_max_speed_{0.35};
-  double turn_heading_threshold_{0.7};
+  double turn_heading_threshold_{0.35};
   double turn_heading_max_speed_{0.18};
-  double home_x_{18.028};
-  double home_y_{20.952};
-  double home_position_tolerance_{0.10};
-  double home_heading_tolerance_{0.10};
-  double home_alignment_angular_speed_{0.25};
+  double final_goal_radius_{0.15};
+  double final_slowdown_distance_{0.6};
+  double final_max_speed_{0.2};
+  double start_alignment_threshold_{0.35};
+  double start_alignment_tolerance_{0.20};
+  double start_alignment_angular_speed_{0.25};
   double danger_distance_{0.6};
   bool safety_enabled_{true};
   bool safety_stop_{false};
@@ -453,6 +491,7 @@ private:
   double heading_error_{0.0};
   double previous_error_{0.0};
   double filtered_derivative_{0.0};
+  double integral_{0.0};
   double start_x_{0.0};
   double start_y_{0.0};
   double goal_x_{0.0};
@@ -478,6 +517,8 @@ private:
   rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr waypoint_subscription_;
   rclcpp::Subscription<sensor_msgs::msg::LaserScan>::SharedPtr scan_subscription_;
   rclcpp::TimerBase::SharedPtr control_timer_;
+  std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
+  std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
   std::ofstream guidance_log_;
 };
 

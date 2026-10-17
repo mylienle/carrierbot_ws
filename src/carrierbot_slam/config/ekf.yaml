@@ -18,6 +18,7 @@ ekf_filter_node:
             true,  true,  false,   # vx, vy, vz
             false, false, false,    # vroll, vpitch, vyaw
             false, false, false ]   # ax, ay, az
+    odom0_twist_rejection_threshold: 10.0
 
     # IMU (gyro for yaw rate, accelerometer)
     imu0: /imu/data
