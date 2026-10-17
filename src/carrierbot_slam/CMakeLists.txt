@@ -42,6 +42,12 @@ install(PROGRAMS
   RENAME save_occupancy_grid
 )
 
+install(PROGRAMS
+  ${PROJECT_NAME}/zed_usb2_rgbd.py
+  DESTINATION lib/${PROJECT_NAME}
+  RENAME zed_usb2_rgbd
+)
+
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
   ament_lint_auto_find_test_dependencies()
