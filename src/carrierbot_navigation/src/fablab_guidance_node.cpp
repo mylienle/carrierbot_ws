@@ -239,7 +239,12 @@ private:
   void scanCallback(const sensor_msgs::msg::LaserScan::SharedPtr message)
   {
     int danger_count = 0;
-    for (const float range : message->ranges) {
+    for (std::size_t i = 0; i < message->ranges.size(); ++i) {
+      const float range = message->ranges[i];
+      const double angle = message->angle_min + i * message->angle_increment;
+      if (std::abs(normalizeAngle(angle - kPi)) > kPi / 2.0) {
+        continue;
+      }
       if (std::isfinite(range) && range >= 0.5F && range <= danger_distance_) {
         ++danger_count;
         if (danger_count >= 30) {
