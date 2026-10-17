@@ -5,8 +5,12 @@
     <xacro:property name="camera_height" value="0.05" />
     <xacro:property name="camera_length" value="0.01" />
     <xacro:property name="camera_width" value="0.10" />
-    <!-- Measured from base_footprint; refine after measuring the physical mount. -->
-    <xacro:property name="camera_mount_height" value="1.10" />
+    <!-- Lens center height from the floor: robot top 1.57 m, camera just below it. -->
+    <xacro:property name="camera_mount_height" value="1.54" />
+    <!-- Forward offset from base_link and pitch (negative = looking up) of the
+         camera on the slanted head; estimates, refine after measuring. -->
+    <xacro:property name="camera_mount_x" value="0.10" />
+    <xacro:property name="camera_mount_pitch" value="-0.35" />
 
     <!-- Physical camera link -->
     <link name="camera_link">
@@ -37,8 +41,8 @@
         <parent link="base_link" />
         <child link="camera_link" />
         <origin
-            xyz="${(base_length + camera_length) / 2.0} 0 ${camera_mount_height - wheel_radius}"
-            rpy="0 0 0" />
+            xyz="${camera_mount_x} 0 ${camera_mount_height - wheel_radius}"
+            rpy="0 ${camera_mount_pitch} 0" />
     </joint>
 
 

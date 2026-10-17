@@ -2,7 +2,7 @@
 
 Starts v4l2_camera for the raw side-by-side stereo stream, zed_usb2_rgbd for
 rectification + StereoSGBM depth, and the static TF from base_link to the
-camera.  cam_x/cam_y/cam_z must be measured on the robot (meters, base_link
+camera.  cam_x/cam_y/cam_z default to the measured mount (meters, base_link
 frame: x forward, y left, z up).
 """
 
@@ -28,11 +28,17 @@ def generate_launch_description():
             "calibration_file", default_value="/usr/local/zed/settings/SN29068780.conf"
         ),
         DeclareLaunchArgument("max_depth", default_value="4.0"),
-        DeclareLaunchArgument("cam_x", description="Camera position from base_link, forward (m)"),
-        DeclareLaunchArgument("cam_y", description="Camera position from base_link, left (m)"),
-        DeclareLaunchArgument("cam_z", description="Camera position from base_link, up (m)"),
+        # Left lens on the robot head: 1.54 m above the floor, 6 cm left of center
+        # (half the ZED 2 baseline).  cam_x and cam_pitch are estimates, the head
+        # is slanted so the camera looks up (negative pitch).
+        DeclareLaunchArgument(
+            "cam_x", default_value="0.10", description="Camera position from base_link, forward (m)"),
+        DeclareLaunchArgument(
+            "cam_y", default_value="0.06", description="Camera position from base_link, left (m)"),
+        DeclareLaunchArgument(
+            "cam_z", default_value="1.44", description="Camera position from base_link, up (m)"),
         DeclareLaunchArgument("cam_yaw", default_value="0.0"),
-        DeclareLaunchArgument("cam_pitch", default_value="0.0"),
+        DeclareLaunchArgument("cam_pitch", default_value="-0.35"),
         DeclareLaunchArgument("cam_roll", default_value="0.0"),
     ]
 
