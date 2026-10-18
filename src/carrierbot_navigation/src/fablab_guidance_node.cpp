@@ -366,6 +366,11 @@ private:
           angular_z_ = clamp(
             angular_speed_ * heading_error_,
             -start_alignment_angular_speed_, start_alignment_angular_speed_);
+          // Keep the D term fresh: a +-pi heading jump at route start must not be
+          // replayed by LOS after aligning (it turned the robot the wrong way)
+          previous_error_ = heading_error_;
+          filtered_derivative_ = 0.0;
+          last_pid_time_ = get_clock()->now();
           return;
         }
       } else {
