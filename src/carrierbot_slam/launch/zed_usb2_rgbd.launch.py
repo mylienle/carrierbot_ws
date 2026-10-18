@@ -29,9 +29,8 @@ def generate_launch_description():
         ),
         DeclareLaunchArgument("max_depth", default_value="3.0"),
         # Left lens on the robot head: 1.54 m above the floor, 6 cm left of center
-        # (half the ZED 2 baseline).  cam_x is an estimate.  The head is slanted
-        # so the camera looks up (negative pitch): ~12.6 deg, fitted from the
-        # floor in the B1 RTAB-Map depth images.
+        # (half the ZED 2 baseline).  cam_x is an estimate.  The camera is level
+        # (measured with a phone on top of it), so cam_pitch is 0.
         DeclareLaunchArgument(
             "cam_x", default_value="0.10", description="Camera position from base_link, forward (m)"),
         DeclareLaunchArgument(
@@ -39,7 +38,7 @@ def generate_launch_description():
         DeclareLaunchArgument(
             "cam_z", default_value="1.44", description="Camera position from base_link, up (m)"),
         DeclareLaunchArgument("cam_yaw", default_value="0.0"),
-        DeclareLaunchArgument("cam_pitch", default_value="-0.22"),
+        DeclareLaunchArgument("cam_pitch", default_value="0.0"),
         DeclareLaunchArgument("cam_roll", default_value="0.0"),
     ]
 
