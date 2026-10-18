@@ -7,10 +7,11 @@
     <xacro:property name="camera_width" value="0.10" />
     <!-- Lens center height from the floor: robot top 1.57 m, camera just below it. -->
     <xacro:property name="camera_mount_height" value="1.54" />
-    <!-- Forward offset from base_link and pitch (negative = looking up) of the
-         camera on the slanted head; estimates, refine after measuring. -->
+    <!-- Forward offset from base_link (estimate) and pitch (negative = looking up)
+         of the camera on the slanted head.  Pitch ~12.6 deg up, fitted from the
+         floor in the B1 RTAB-Map depth images; refine after measuring. -->
     <xacro:property name="camera_mount_x" value="0.10" />
-    <xacro:property name="camera_mount_pitch" value="-0.35" />
+    <xacro:property name="camera_mount_pitch" value="-0.22" />
 
     <!-- Physical camera link -->
     <link name="camera_link">
