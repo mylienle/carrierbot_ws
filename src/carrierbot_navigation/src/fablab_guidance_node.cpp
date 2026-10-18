@@ -83,7 +83,7 @@ public:
     direct_ = declare_parameter<double>("direct", 1.0);
     delta_min_ = declare_parameter<double>("delta_min", 0.5);
     delta_max_ = declare_parameter<double>("delta_max", 0.8);
-    lookahead_gamma_ = declare_parameter<double>("lookahead_gamma", 0.2);
+    lookahead_gamma_ = declare_parameter<double>("lookahead_gamma", 4.0);
     corner_turn_threshold_ = declare_parameter<double>("corner_turn_threshold", 0.35);
     corner_advance_ = declare_parameter<double>("corner_advance", 0.0);
     corner_slowdown_distance_ = declare_parameter<double>("corner_slowdown_distance", 0.8);
@@ -437,8 +437,12 @@ private:
       const double half_turn = std::abs(angular_z_) * 0.57 / 2.0;
       command.linear.x = linear_x_ > 0.0 ?
         std::max(half_turn, std::min(linear_x_, 0.9 - half_turn)) : linear_x_;
+      // Speed up at most 0.03 m/s per cycle (0.3 m/s^2) so steps like 0.3 -> 0.6 do not lurch;
+      // slowing down stays immediate
+      command.linear.x = std::min(command.linear.x, std::max(half_turn, last_linear_cmd_ + 0.03));
       command.angular.z = angular_z_;
     }
+    last_linear_cmd_ = command.linear.x;
     cmd_publisher_->publish(command);
     writeGuidanceLog(command);
   }
@@ -486,6 +490,7 @@ private:
   double danger_distance_{0.6};
   bool safety_enabled_{true};
   bool safety_stop_{false};
+  double last_linear_cmd_{0.0};
   bool has_pose_{false};
   bool finished_{false};
   bool start_alignment_pending_{false};
