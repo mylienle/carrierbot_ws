@@ -83,7 +83,7 @@ public:
     direct_ = declare_parameter<double>("direct", 1.0);
     delta_min_ = declare_parameter<double>("delta_min", 0.5);
     delta_max_ = declare_parameter<double>("delta_max", 0.8);
-    lookahead_gamma_ = declare_parameter<double>("lookahead_gamma", 0.2);
+    lookahead_gamma_ = declare_parameter<double>("lookahead_gamma", 4.0);
     corner_turn_threshold_ = declare_parameter<double>("corner_turn_threshold", 0.35);
     corner_advance_ = declare_parameter<double>("corner_advance", 0.0);
     corner_slowdown_distance_ = declare_parameter<double>("corner_slowdown_distance", 0.8);
