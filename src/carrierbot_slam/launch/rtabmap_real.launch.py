@@ -63,6 +63,10 @@ def generate_launch_description():
                 " --Icp/VoxelSize 0.05"
                 " --Icp/MaxCorrespondenceDistance 0.1"
                 " --Grid/Sensor 0"
+                # Add a node and try loop closure twice per second instead of the
+                # default 1 Hz: denser map, and still below the 3-6 Hz depth rate
+                # measured with the full robot stack running.
+                " --Rtabmap/DetectionRate 2"
             ),
             "rtabmap_viz": LaunchConfiguration("rtabmap_viz"),
             "rviz": "false",
