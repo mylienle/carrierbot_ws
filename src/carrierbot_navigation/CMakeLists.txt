@@ -59,6 +59,7 @@ add_executable(fablab_guidance_node
 
 ament_target_dependencies(fablab_guidance_node
   geometry_msgs
+  nav_msgs
   rclcpp
   sensor_msgs
   std_msgs

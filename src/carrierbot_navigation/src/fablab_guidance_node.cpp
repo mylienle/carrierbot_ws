@@ -15,6 +15,8 @@
 #include "geometry_msgs/msg/pose_stamped.hpp"
 #include "geometry_msgs/msg/pose_with_covariance_stamped.hpp"
 #include "geometry_msgs/msg/twist.hpp"
+#include "nav_msgs/msg/occupancy_grid.hpp"
+#include "obstacle_avoidance.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "sensor_msgs/msg/laser_scan.hpp"
 #include "std_msgs/msg/bool.hpp"
@@ -103,6 +105,25 @@ public:
     initial_pose_topic_ = declare_parameter<std::string>("initial_pose_topic", "/initialpose");
     waypoint_topic_ = declare_parameter<std::string>("waypoint_topic", "/fablab_waypoints");
     scan_topic_ = declare_parameter<std::string>("scan_topic", "/scan");
+    // Reactive avoidance of the paper (Section V); defaults follow Table I
+    avoidance_enabled_ = declare_parameter<bool>("avoidance_enabled", true);
+    avoid_params_.robot_radius = declare_parameter<double>("robot_radius", 0.52);
+    avoid_params_.clearance = declare_parameter<double>("avoid_clearance", 0.25);
+    avoid_params_.avoid_distance = declare_parameter<double>("avoid_distance", 2.5);
+    avoid_params_.rejoin_distance = declare_parameter<double>("rejoin_distance", 2.0);
+    avoid_params_.stop_min_clearance = declare_parameter<double>("stop_min_clearance", 0.3);
+    avoid_params_.actuator_delay = declare_parameter<double>("actuator_delay", 0.17);
+    avoid_params_.brake_decel = declare_parameter<double>("brake_decel", 0.6);
+    avoid_params_.wall_margin = declare_parameter<double>("avoid_wall_margin", 0.05);
+    avoid_params_.max_lateral = declare_parameter<double>("avoid_max_lateral", 2.5);
+    avoid_params_.switch_radius = goal_radius_;
+    sense_distance_ = declare_parameter<double>("sense_distance", 5.0);
+    // -1 = pass the obstacle on the right (sigma of Eq. 21), +1 = left
+    avoid_side_ = static_cast<int>(declare_parameter<int64_t>("avoid_side", -1));
+    avoid_confirm_cycles_ = static_cast<int>(declare_parameter<int64_t>("avoid_confirm_cycles", 3));
+    // Scan points this close to an occupied map cell are walls, not new obstacles
+    map_ignore_radius_ = declare_parameter<double>("map_ignore_radius", 0.15);
+    map_topic_ = declare_parameter<std::string>("map_topic", "/map");
     guidance_log_path_ = declare_parameter<std::string>("guidance_log_path", guidanceLogPath());
 
     if (
@@ -114,7 +135,10 @@ public:
       final_goal_radius_ <= 0.0 || final_slowdown_distance_ <= 0.0 || final_max_speed_ <= 0.0 ||
       start_alignment_tolerance_ <= 0.0 ||
       start_alignment_threshold_ < start_alignment_tolerance_ ||
-      start_alignment_angular_speed_ <= 0.0)
+      start_alignment_angular_speed_ <= 0.0 ||
+      avoid_params_.robot_radius <= 0.0 || avoid_params_.clearance < 0.0 ||
+      avoid_params_.avoid_distance <= 0.0 || avoid_params_.rejoin_distance <= 0.0 ||
+      avoid_params_.brake_decel <= 0.0 || sense_distance_ < avoid_params_.avoid_distance)
     {
       throw std::runtime_error("Invalid Fablab guidance parameters");
     }
@@ -132,7 +156,12 @@ public:
     waypoint_subscription_ = create_subscription<geometry_msgs::msg::PoseStamped>(
       waypoint_topic_, 100,
       std::bind(&FablabGuidanceNode::waypointCallback, this, std::placeholders::_1));
-    if (safety_enabled_) {
+    if (avoidance_enabled_) {
+      map_subscription_ = create_subscription<nav_msgs::msg::OccupancyGrid>(
+        map_topic_, rclcpp::QoS(1).transient_local().reliable(),
+        [this](const nav_msgs::msg::OccupancyGrid::SharedPtr message) {map_ = message;});
+    }
+    if (safety_enabled_ || avoidance_enabled_) {
       scan_subscription_ = create_subscription<sensor_msgs::msg::LaserScan>(
         scan_topic_, 10,
         std::bind(&FablabGuidanceNode::scanCallback, this, std::placeholders::_1));
@@ -148,7 +177,8 @@ public:
       guidance_log_ <<
         "time_s,segment,amcl_x,amcl_y,amcl_yaw,start_x,start_y,goal_x,goal_y,"
         "cross_track,long_track,lookahead,target_heading,heading_error,remaining_distance,"
-        "linear_cmd,angular_cmd,safety_stop,finished\n";
+        "linear_cmd,angular_cmd,safety_stop,finished,"
+        "avoid_state,obstacle_x,obstacle_y,obstacle_r,obstacle_distance\n";
       RCLCPP_INFO(get_logger(), "Guidance CSV: %s", guidance_log_path_.c_str());
     } else {
       RCLCPP_WARN(get_logger(), "Cannot open guidance CSV: %s", guidance_log_path_.c_str());
@@ -190,6 +220,7 @@ private:
       current_segment_ = 0;
       arrival_published_ = false;
       finished_ = false;
+      resetAvoidance();
     }
 
     const double waypoint_x = message->pose.position.x;
@@ -238,6 +269,12 @@ private:
 
   void scanCallback(const sensor_msgs::msg::LaserScan::SharedPtr message)
   {
+    if (avoidance_enabled_) {
+      storeScanPoints(*message);
+    }
+    if (!safety_enabled_) {
+      return;
+    }
     int danger_count = 0;
     for (std::size_t i = 0; i < message->ranges.size(); ++i) {
       const float range = message->ranges[i];
@@ -254,6 +291,132 @@ private:
       }
     }
     safety_stop_ = false;
+  }
+
+  // Scan points in the map frame, in scan order, flagged when they are not on the static map
+  void storeScanPoints(const sensor_msgs::msg::LaserScan & message)
+  {
+    if (!laser_offset_known_) {
+      try {
+        const auto transform = tf_buffer_->lookupTransform(
+          "base_footprint", message.header.frame_id, tf2::TimePointZero);
+        laser_x_ = transform.transform.translation.x;
+        laser_y_ = transform.transform.translation.y;
+        const auto & q = transform.transform.rotation;
+        laser_yaw_ = std::atan2(2.0 * (q.w * q.z + q.x * q.y), 1.0 - 2.0 * (q.y * q.y + q.z * q.z));
+        laser_offset_known_ = true;
+      } catch (const tf2::TransformException &) {
+        return;
+      }
+    }
+    scan_points_.clear();
+    scan_point_is_new_.clear();
+    const double cos_theta = std::cos(theta_);
+    const double sin_theta = std::sin(theta_);
+    for (std::size_t i = 0; i < message.ranges.size(); ++i) {
+      const float range = message.ranges[i];
+      if (!std::isfinite(range) || range < message.range_min || range > sense_distance_) {
+        continue;
+      }
+      const double angle = laser_yaw_ + message.angle_min + i * message.angle_increment;
+      const double base_x = laser_x_ + range * std::cos(angle);
+      const double base_y = laser_y_ + range * std::sin(angle);
+      const fablab_avoidance::Point point{
+        x_ + base_x * cos_theta - base_y * sin_theta,
+        y_ + base_x * sin_theta + base_y * cos_theta};
+      scan_points_.push_back(point);
+      scan_point_is_new_.push_back(!onStaticMap(point));
+    }
+  }
+
+  bool onStaticMap(const fablab_avoidance::Point & point) const
+  {
+    if (!map_ || map_->info.resolution <= 0.0) {
+      return false;
+    }
+    const auto & info = map_->info;
+    const int cell_x = static_cast<int>(std::floor((point.x - info.origin.position.x) / info.resolution));
+    const int cell_y = static_cast<int>(std::floor((point.y - info.origin.position.y) / info.resolution));
+    const int reach = static_cast<int>(std::ceil(map_ignore_radius_ / info.resolution));
+    for (int dy = -reach; dy <= reach; ++dy) {
+      for (int dx = -reach; dx <= reach; ++dx) {
+        const int x = cell_x + dx;
+        const int y = cell_y + dy;
+        if (x < 0 || y < 0 || x >= static_cast<int>(info.width) || y >= static_cast<int>(info.height)) {
+          continue;
+        }
+        if (map_->data[static_cast<std::size_t>(y) * info.width + x] >= 50) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  void resetAvoidance()
+  {
+    avoid_stop_ = false;
+    avoid_end_segment_ = 0;
+    avoid_confirm_count_ = 0;
+    obstacle_ = fablab_avoidance::Obstacle();
+  }
+
+  // Detection, decision and stopping monitor of the paper (Eq. 19, 20). On a valid plan the
+  // robot pose R, A and B are inserted before the segment goal; the original waypoints are
+  // followed again once the segment ending at that goal is active.
+  void updateAvoidance()
+  {
+    avoid_stop_ = false;
+    obstacle_ = fablab_avoidance::Obstacle();
+    if (!avoidance_enabled_ || finished_ || start_alignment_pending_ ||
+      current_segment_ + 1 >= waypoints_.size())
+    {
+      avoid_confirm_count_ = 0;
+      return;
+    }
+    const fablab_avoidance::Point robot{x_, y_};
+    const fablab_avoidance::Point start{
+      waypoints_[current_segment_].first, waypoints_[current_segment_].second};
+    const fablab_avoidance::Point goal{
+      waypoints_[current_segment_ + 1].first, waypoints_[current_segment_ + 1].second};
+    obstacle_ = fablab_avoidance::detectObstacle(
+      scan_points_, scan_point_is_new_, robot, start, goal, avoid_params_);
+    if (!obstacle_.found || obstacle_.surface_distance >= avoid_params_.avoid_distance) {
+      avoid_confirm_count_ = 0;
+      return;
+    }
+    if (obstacle_.surface_distance <=
+      fablab_avoidance::brakeDistance(last_linear_cmd_, avoid_params_))
+    {
+      avoid_stop_ = true;
+      return;
+    }
+    if (current_segment_ + 1 < avoid_end_segment_) {
+      // Already following an avoidance pair: leave it to the stopping monitor
+      return;
+    }
+    if (++avoid_confirm_count_ < avoid_confirm_cycles_) {
+      return;
+    }
+    const auto inserted = fablab_avoidance::planAvoidance(
+      obstacle_, scan_points_, robot, start, goal, avoid_side_, avoid_params_);
+    if (inserted.empty()) {
+      avoid_stop_ = true;
+      return;
+    }
+    const auto position = waypoints_.begin() + static_cast<std::ptrdiff_t>(current_segment_ + 1);
+    std::vector<std::pair<double, double>> pair;
+    for (const auto & point : inserted) {
+      pair.emplace_back(point.x, point.y);
+    }
+    waypoints_.insert(position, pair.begin(), pair.end());
+    ++current_segment_;  // the active segment is now R -> A
+    avoid_end_segment_ = current_segment_ + inserted.size();
+    avoid_confirm_count_ = 0;
+    RCLCPP_WARN(
+      get_logger(), "Avoiding obstacle at (%.2f, %.2f) r=%.2f m, d=%.2f m via A=(%.2f, %.2f)",
+      obstacle_.center.x, obstacle_.center.y, obstacle_.radius, obstacle_.surface_distance,
+      inserted[1].x, inserted[1].y);
   }
 
   double pid(double error)
@@ -433,10 +596,11 @@ private:
       theta_ = std::atan2(2.0 * (q.w * q.z + q.x * q.y), 1.0 - 2.0 * (q.y * q.y + q.z * q.z));
     } catch (const tf2::TransformException &) {
     }
+    updateAvoidance();
     updateRoute();
 
     geometry_msgs::msg::Twist command;
-    if (!finished_ && !safety_stop_) {
+    if (!finished_ && !safety_stop_ && !avoid_stop_) {
       // Driver wheel limit is 0.9 m/s: keep v + |w|*L/2 below it so turning is not clipped,
       // and v >= |w|*L/2 so the inner wheel never reverses (jerk at corners)
       const double half_turn = std::abs(angular_z_) * 0.57 / 2.0;
@@ -464,7 +628,11 @@ private:
                   << cross_track_ << ',' << long_track_ << ',' << lookahead_ << ','
                   << target_heading_ << ',' << heading_error_ << ',' << remaining_distance_ << ','
                   << command.linear.x << ',' << command.angular.z << ','
-                  << safety_stop_ << ',' << finished_ << '\n';
+                  << safety_stop_ << ',' << finished_ << ','
+                  << (avoid_stop_ ? 2 : (current_segment_ + 1 < avoid_end_segment_ ? 1 : 0)) << ','
+                  << (obstacle_.found ? obstacle_.center.x : 0.0) << ','
+                  << (obstacle_.found ? obstacle_.center.y : 0.0) << ','
+                  << obstacle_.radius << ',' << obstacle_.surface_distance << '\n';
     guidance_log_.flush();
   }
 
@@ -495,6 +663,23 @@ private:
   double danger_distance_{0.6};
   bool safety_enabled_{true};
   bool safety_stop_{false};
+  bool avoidance_enabled_{true};
+  bool avoid_stop_{false};
+  fablab_avoidance::Params avoid_params_;
+  fablab_avoidance::Obstacle obstacle_;
+  double sense_distance_{5.0};
+  int avoid_side_{-1};
+  int avoid_confirm_cycles_{3};
+  int avoid_confirm_count_{0};
+  std::size_t avoid_end_segment_{0};
+  double map_ignore_radius_{0.15};
+  bool laser_offset_known_{false};
+  double laser_x_{0.0};
+  double laser_y_{0.0};
+  double laser_yaw_{0.0};
+  std::vector<fablab_avoidance::Point> scan_points_;
+  std::vector<bool> scan_point_is_new_;
+  nav_msgs::msg::OccupancyGrid::SharedPtr map_;
   double last_linear_cmd_{0.0};
   bool has_pose_{false};
   bool finished_{false};
@@ -525,6 +710,7 @@ private:
   std::string initial_pose_topic_;
   std::string waypoint_topic_;
   std::string scan_topic_;
+  std::string map_topic_;
   std::string guidance_log_path_;
   std::vector<std::pair<double, double>> waypoints_;
   std::vector<std::pair<double, double>> pending_waypoints_;
@@ -535,6 +721,7 @@ private:
   rclcpp::Subscription<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr initial_pose_subscription_;
   rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr waypoint_subscription_;
   rclcpp::Subscription<sensor_msgs::msg::LaserScan>::SharedPtr scan_subscription_;
+  rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::SharedPtr map_subscription_;
   rclcpp::TimerBase::SharedPtr control_timer_;
   std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
   std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
