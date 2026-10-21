@@ -31,7 +31,14 @@ def load_zed_calibration(path, resolution, image_size):
         k = np.array([[float(sec['fx']), 0.0, float(sec['cx'])],
                       [0.0, float(sec['fy']), float(sec['cy'])],
                       [0.0, 0.0, 1.0]])
-        d = np.array([float(sec.get(name, '0')) for name in ('k1', 'k2', 'p1', 'p2', 'k3')])
+
+        dist = conf[f'{side}_DISTO'] if conf.has_section(f'{side}_DISTO') else sec
+
+        d = np.array([
+            float(dist.get(name, '0'))
+            for name in ('k1', 'k2', 'p1', 'p2', 'k3', 'k4', 'k5', 'k6')
+        ], dtype=np.float64)
+
         return k, d
 
     k_left, d_left = intrinsics('LEFT')
