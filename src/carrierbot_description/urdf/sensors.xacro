@@ -2,6 +2,14 @@
 <robot xmlns:xacro="http://www.ros.org/wiki/xacro">
     <xacro:property name="lidar_height" value="0.037" />
     <xacro:property name="lidar_radius" value="0.0345" />
+    <!-- Simulated scan matched to the real RPLidar S2 (real_robot.launch.py):
+         DenseBoost at 10 Hz gives 3200 points per turn (0.1125 deg).
+         Range 0.5-12 m is what laser_filter keeps on the real robot.
+         Noise 0.01 m std is about the S2 datasheet accuracy (+-30 mm). -->
+    <xacro:property name="lidar_samples" value="3200" />
+    <xacro:property name="lidar_min_range" value="0.5" />
+    <xacro:property name="lidar_max_range" value="12.0" />
+    <xacro:property name="lidar_noise_std" value="0.01" />
 
     <!-- Include lidar -->
     <link name="laser">
@@ -84,15 +92,15 @@
                 <ray>
                     <scan>
                         <horizontal>
-                            <samples>720</samples>
+                            <samples>${lidar_samples}</samples>
                             <resolution>1</resolution>
                             <min_angle>-3.14</min_angle>
                             <max_angle>3.14</max_angle>
                         </horizontal>
                     </scan>
                     <range>
-                        <min>0.5</min>
-                        <max>18.0</max>
+                        <min>${lidar_min_range}</min>
+                        <max>${lidar_max_range}</max>
                         <resolution>0.01</resolution>
                     </range>
                 </ray>
@@ -111,17 +119,22 @@
                 <ray>
                     <scan>
                         <horizontal>
-                        <samples>720</samples>
+                        <samples>${lidar_samples}</samples>
                             <resolution>1</resolution>
                             <min_angle>-3.14</min_angle>
                             <max_angle>3.14</max_angle>
                         </horizontal>
                     </scan>
                     <range>
-                        <min>0.5</min>
-                        <max>18.0</max>
+                        <min>${lidar_min_range}</min>
+                        <max>${lidar_max_range}</max>
                         <resolution>1</resolution>
                     </range>
+                    <noise>
+                        <type>gaussian</type>
+                        <mean>0.0</mean>
+                        <stddev>${lidar_noise_std}</stddev>
+                    </noise>
                 </ray>
                 <plugin name="laser_controller" filename="libgazebo_ros_ray_sensor.so">
                     <ros>

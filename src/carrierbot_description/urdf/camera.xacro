@@ -13,6 +13,16 @@
     <xacro:property name="camera_mount_x" value="0.10" />
     <xacro:property name="camera_mount_pitch" value="0.0" />
 
+    <!-- Simulated RGB-D matched to the real ZED 2 pipeline (zed_usb2_rgbd.py):
+         VGA 672x376, depth limited to 0.3-3.0 m (max_depth in zed_usb2_rgbd.launch.py).
+         HFOV = 2*atan(336/fx). fx ~ 264 px is the usual ZED 2 VGA value; confirm with the
+         "rectified fx" line that zed_usb2_rgbd prints at startup on the robot. -->
+    <xacro:property name="camera_hfov" value="1.81" />
+    <xacro:property name="camera_image_width" value="672" />
+    <xacro:property name="camera_image_height" value="376" />
+    <xacro:property name="camera_min_depth" value="0.3" />
+    <xacro:property name="camera_max_depth" value="3.0" />
+
     <!-- Physical camera link -->
     <link name="camera_link">
         <visual>
@@ -78,11 +88,11 @@
                 <update_rate>15.0</update_rate>
 
                 <camera name="rgbd_camera">
-                    <horizontal_fov>1.047</horizontal_fov>
+                    <horizontal_fov>${camera_hfov}</horizontal_fov>
 
                     <image>
-                        <width>640</width>
-                        <height>480</height>
+                        <width>${camera_image_width}</width>
+                        <height>${camera_image_height}</height>
                         <format>R8G8B8</format>
                     </image>
 
@@ -107,8 +117,8 @@
 
                     <camera_name>rgbd</camera_name>
                     <frame_name>camera_rgb_optical_frame</frame_name>
-                    <min_depth>0.1</min_depth>
-                    <max_depth>20.0</max_depth>
+                    <min_depth>${camera_min_depth}</min_depth>
+                    <max_depth>${camera_max_depth}</max_depth>
                 </plugin>
             </sensor>
 
