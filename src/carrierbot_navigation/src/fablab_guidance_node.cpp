@@ -97,6 +97,9 @@ public:
     start_alignment_threshold_ = declare_parameter<double>("start_alignment_threshold", 0.35);
     start_alignment_tolerance_ = declare_parameter<double>("start_alignment_tolerance", 0.20);
     start_alignment_angular_speed_ = declare_parameter<double>("start_alignment_angular_speed", 0.25);
+    // Offset-start tests: if the route's first point is within this radius, start the first
+    // segment there instead of at the robot pose (0 disables)
+    start_snap_radius_ = declare_parameter<double>("start_snap_radius", 0.0);
     danger_distance_ = declare_parameter<double>("danger_distance", 0.6);
     safety_enabled_ = declare_parameter<bool>("safety_enabled", true);
     pose_topic_ = declare_parameter<std::string>("pose_topic", "/amcl_pose");
@@ -114,7 +117,7 @@ public:
       final_goal_radius_ <= 0.0 || final_slowdown_distance_ <= 0.0 || final_max_speed_ <= 0.0 ||
       start_alignment_tolerance_ <= 0.0 ||
       start_alignment_threshold_ < start_alignment_tolerance_ ||
-      start_alignment_angular_speed_ <= 0.0)
+      start_alignment_angular_speed_ <= 0.0 || start_snap_radius_ < 0.0)
     {
       throw std::runtime_error("Invalid Fablab guidance parameters");
     }
@@ -227,6 +230,15 @@ private:
       std::hypot(waypoint_x - waypoints_.front().first, waypoint_y - waypoints_.front().second) < 0.05)
     {
       RCLCPP_INFO(get_logger(), "Ignoring duplicate route start waypoint");
+      return;
+    }
+    if (waypoints_.size() == 1 &&
+      std::hypot(waypoint_x - waypoints_.front().first, waypoint_y - waypoints_.front().second) <
+      start_snap_radius_)
+    {
+      waypoints_.front() = {waypoint_x, waypoint_y};
+      RCLCPP_INFO(
+        get_logger(), "Using route start (%.3f, %.3f) as first segment start", waypoint_x, waypoint_y);
       return;
     }
 
@@ -492,6 +504,7 @@ private:
   double start_alignment_threshold_{0.35};
   double start_alignment_tolerance_{0.20};
   double start_alignment_angular_speed_{0.25};
+  double start_snap_radius_{0.0};
   double danger_distance_{0.6};
   bool safety_enabled_{true};
   bool safety_stop_{false};

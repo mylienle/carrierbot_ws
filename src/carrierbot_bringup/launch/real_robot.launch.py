@@ -75,6 +75,9 @@ def generate_launch_description():
         "delta_max", default_value="0.8", description="LOS look-ahead maximum (m)")
     kd_arg = DeclareLaunchArgument(
         "KD", default_value="0.7", description="Heading D gain")
+    start_snap_radius_arg = DeclareLaunchArgument(
+        "start_snap_radius", default_value="0.0",
+        description="Offset-start test: start the first segment at the route start if within this radius (m)")
 
     channel_type_arg = DeclareLaunchArgument(
             'channel_type',
@@ -235,6 +238,8 @@ def generate_launch_description():
             "delta_min": ParameterValue(LaunchConfiguration("delta_min"), value_type=float),
             "delta_max": ParameterValue(LaunchConfiguration("delta_max"), value_type=float),
             "KD": ParameterValue(LaunchConfiguration("KD"), value_type=float),
+            "start_snap_radius": ParameterValue(
+                LaunchConfiguration("start_snap_radius"), value_type=float),
         }],
         condition=IfCondition(PythonExpression([
             "'", use_amcl, "' == 'true' and '", guidance_mode, "' == 'fablab_los_pd'"
@@ -307,6 +312,7 @@ def generate_launch_description():
         delta_min_arg,
         delta_max_arg,
         kd_arg,
+        start_snap_radius_arg,
         channel_type_arg,
         serial_port_arg,
         lidar_port_log,
