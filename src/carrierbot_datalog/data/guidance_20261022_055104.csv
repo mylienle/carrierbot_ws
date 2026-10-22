@@ -1,0 +1,1 @@
+time_s,segment,amcl_x,amcl_y,amcl_yaw,start_x,start_y,goal_x,goal_y,cross_track,long_track,lookahead,target_heading,heading_error,remaining_distance,linear_cmd,angular_cmd,safety_stop,finished
