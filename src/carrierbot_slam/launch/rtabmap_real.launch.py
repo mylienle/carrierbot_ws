@@ -65,7 +65,8 @@ def generate_launch_description():
                 " --Grid/Sensor 0"
                
             ),
-            "rtabmap_viz": LaunchConfiguration("rtabmap_viz"),
+            # rtabmap_launch on Foxy (0.21.1) names this argument "rtabmapviz".
+            "rtabmapviz": LaunchConfiguration("rtabmap_viz"),
             "rviz": "false",
         }.items(),
     )
