@@ -14,7 +14,7 @@ from launch_ros.actions import Node
 
 def generate_launch_description():
     arguments = [
-        DeclareLaunchArgument("depth_mode", default_value="NEURAL",
+        DeclareLaunchArgument("depth_mode", default_value="ULTRA",
                               description="NEURAL, ULTRA, QUALITY or PERFORMANCE"),
         DeclareLaunchArgument("max_depth", default_value="3.0"),
         DeclareLaunchArgument(

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """RGB-D for RTAB-Map from a ZED 2 / 2i through the ZED SDK (pyzed).
 
-Drop-in replacement for zed_usb2_rgbd: depth is computed by the SDK on the GPU
+Drop-in replacement for zed_usb2_rgbd: depth is computed by the SDK on the GPU (ULTRA by default, NEURAL needs TensorRT)
 instead of StereoSGBM on the CPU.  Publishes, with the same stamp and frame:
   rgb/image_rect   (bgr8, rectified left eye)
   depth/image      (32FC1, meters, 0 = invalid)
@@ -23,7 +23,7 @@ class ZedSdkRgbd(Node):
 
         resolution = self.declare_parameter('resolution', 'VGA').value
         fps = self.declare_parameter('fps', 15).value
-        depth_mode = self.declare_parameter('depth_mode', 'NEURAL').value
+        depth_mode = self.declare_parameter('depth_mode', 'ULTRA').value
         self.frame_id = self.declare_parameter('frame_id', 'zed_left_optical_frame').value
         min_depth = self.declare_parameter('min_depth', 0.3).value
         max_depth = self.declare_parameter('max_depth', 3.0).value
@@ -76,7 +76,8 @@ class ZedSdkRgbd(Node):
         msg.width = self.width
         msg.encoding = encoding
         msg.step = step
-        msg.data = data.tobytes()
+        # frombytes() skips the per-byte range check that `msg.data = bytes` does (~1 s/frame).
+        msg.data.frombytes(data.tobytes())
         return msg
 
     def grab_and_publish(self):
