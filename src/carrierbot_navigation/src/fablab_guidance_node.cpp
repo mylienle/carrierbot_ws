@@ -118,8 +118,8 @@ public:
     avoid_params_.max_lateral = declare_parameter<double>("avoid_max_lateral", 2.5);
     avoid_params_.switch_radius = goal_radius_;
     sense_distance_ = declare_parameter<double>("sense_distance", 5.0);
-    // Raw /scan also hits the robot's own frame; ignore returns closer than this, like laser_filter
-    avoid_min_range_ = declare_parameter<double>("avoid_min_range", 0.5);
+    // Raw /scan also hits the robot's own frame; ignore returns closer than this to the robot centre
+    avoid_self_radius_ = declare_parameter<double>("avoid_self_radius", 0.6);
     // -1 = pass the obstacle on the right (sigma of Eq. 21), +1 = left
     avoid_side_ = static_cast<int>(declare_parameter<int64_t>("avoid_side", -1));
     avoid_confirm_cycles_ = static_cast<int>(declare_parameter<int64_t>("avoid_confirm_cycles", 3));
@@ -317,14 +317,15 @@ private:
     const double sin_theta = std::sin(theta_);
     for (std::size_t i = 0; i < message.ranges.size(); ++i) {
       const float range = message.ranges[i];
-      if (!std::isfinite(range) || range < std::max<double>(message.range_min, avoid_min_range_) ||
-        range > sense_distance_)
-      {
+      if (!std::isfinite(range) || range < message.range_min || range > sense_distance_) {
         continue;
       }
       const double angle = laser_yaw_ + message.angle_min + i * message.angle_increment;
       const double base_x = laser_x_ + range * std::cos(angle);
       const double base_y = laser_y_ + range * std::sin(angle);
+      if (std::hypot(base_x, base_y) < avoid_self_radius_) {
+        continue;
+      }
       const fablab_avoidance::Point point{
         x_ + base_x * cos_theta - base_y * sin_theta,
         y_ + base_x * sin_theta + base_y * cos_theta};
@@ -672,7 +673,7 @@ private:
   fablab_avoidance::Params avoid_params_;
   fablab_avoidance::Obstacle obstacle_;
   double sense_distance_{5.0};
-  double avoid_min_range_{0.5};
+  double avoid_self_radius_{0.6};
   int avoid_side_{-1};
   int avoid_confirm_cycles_{3};
   int avoid_confirm_count_{0};
