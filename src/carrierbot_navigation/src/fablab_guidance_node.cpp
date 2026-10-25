@@ -79,6 +79,7 @@ public:
     max_linear_speed_ = declare_parameter<double>("linear_speed_max", 0.6);
     max_angular_speed_ = declare_parameter<double>("angular_speed_max", 0.8);
     kd_ = declare_parameter<double>("KD", 0.7);
+    ki_ = declare_parameter<double>("KI", 0.1);
     min_linear_speed_ = declare_parameter<double>("min_speed_linear", 0.3);
     direct_ = declare_parameter<double>("direct", 1.0);
     delta_min_ = declare_parameter<double>("delta_min", 0.5);
@@ -283,7 +284,7 @@ private:
     previous_error_ = error;
     last_pid_time_ = now;
     if (std::abs(error) < 0.05) {
-      integral_ = clamp(integral_ + 0.1 * cycle_seconds_ * error, -0.1, 0.1);
+      integral_ = clamp(integral_ + ki_ * cycle_seconds_ * error, -0.1, 0.1);
     }
     return angular_speed_ * error + kd_ * filtered_derivative_ + integral_;
   }
@@ -487,6 +488,7 @@ private:
   double max_linear_speed_{0.6};
   double max_angular_speed_{0.8};
   double kd_{0.7};
+  double ki_{0.1};
   double min_linear_speed_{0.3};
   double direct_{1.0};
   double delta_min_{0.5};
