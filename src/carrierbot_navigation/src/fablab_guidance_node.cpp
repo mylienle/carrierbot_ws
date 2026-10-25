@@ -406,7 +406,9 @@ private:
     const auto inserted = fablab_avoidance::planAvoidance(
       obstacle_, scan_points_, robot, start, goal, avoid_side_, avoid_params_);
     if (inserted.empty()) {
-      avoid_stop_ = true;
+      // No pair fits from here (e.g. the robot is still inside a narrow passage). The obstacle is
+      // beyond d_brake, so keep following the original path and plan again next cycle; the
+      // braking check above stops the robot if no pair is found before d_brake.
       return;
     }
     const auto position = waypoints_.begin() + static_cast<std::ptrdiff_t>(current_segment_ + 1);
