@@ -26,6 +26,12 @@
 namespace
 {
 constexpr double kPi = 3.14159265358979323846;
+// A latched avoidance stop is released once d_obs exceeds d_brake by this much (m)
+constexpr double kAvoidReleaseMargin = 0.3;
+// ... for this many consecutive cycles (1 s at 10 Hz), so a detection flicker does not release it
+constexpr int kAvoidReleaseCycles = 10;
+// Largest move of the obstacle centre between cycles still counted as the same estimate (m)
+constexpr double kAvoidCenterJump = 0.25;
 
 double normalizeAngle(double angle)
 {
@@ -392,6 +398,8 @@ private:
     avoid_stop_ = false;
     avoid_end_segment_ = 0;
     avoid_confirm_count_ = 0;
+    avoid_latched_ = false;
+    avoid_release_count_ = 0;
     obstacle_ = fablab_avoidance::Obstacle();
   }
 
@@ -415,20 +423,46 @@ private:
       waypoints_[current_segment_ + 1].first, waypoints_[current_segment_ + 1].second};
     obstacle_ = fablab_avoidance::detectObstacle(
       scan_points_, scan_point_is_new_, robot, start, goal, avoid_params_);
+    const double brake_distance = fablab_avoidance::brakeDistance(last_linear_cmd_, avoid_params_);
+    if (avoid_latched_) {
+      // Once stopped, stay stopped: d_obs jitters around d_brake, and every creep forward brings
+      // the obstacle closer to avoid_self_radius, where its points are dropped and it vanishes.
+      // Release only after the obstacle is gone or clearly beyond d_brake for a while.
+      if (obstacle_.found && obstacle_.surface_distance <= brake_distance + kAvoidReleaseMargin) {
+        avoid_release_count_ = 0;
+      } else {
+        ++avoid_release_count_;
+      }
+      if (avoid_release_count_ < kAvoidReleaseCycles) {
+        avoid_stop_ = true;
+        return;
+      }
+      avoid_latched_ = false;
+      avoid_release_count_ = 0;
+      avoid_confirm_count_ = 0;
+    }
     if (!obstacle_.found || obstacle_.surface_distance >= avoid_params_.avoid_distance) {
       avoid_confirm_count_ = 0;
       return;
     }
-    if (obstacle_.surface_distance <=
-      fablab_avoidance::brakeDistance(last_linear_cmd_, avoid_params_))
-    {
+    if (obstacle_.surface_distance <= brake_distance) {
       avoid_stop_ = true;
+      avoid_latched_ = true;
+      avoid_release_count_ = 0;
       return;
     }
     if (current_segment_ + 1 < avoid_end_segment_) {
       // Already following an avoidance pair: leave it to the stopping monitor
       return;
     }
+    // Plan only on an estimate that has settled: close to the obstacle the nearest point can
+    // switch to another face or a neighbouring object and move the centre by more than 0.5 m
+    if (avoid_confirm_count_ > 0 &&
+      fablab_avoidance::distance(obstacle_.center, last_obstacle_center_) > kAvoidCenterJump)
+    {
+      avoid_confirm_count_ = 0;
+    }
+    last_obstacle_center_ = obstacle_.center;
     if (++avoid_confirm_count_ < avoid_confirm_cycles_) {
       return;
     }
@@ -712,6 +746,9 @@ private:
   int avoid_side_{-1};
   int avoid_confirm_cycles_{3};
   int avoid_confirm_count_{0};
+  bool avoid_latched_{false};
+  int avoid_release_count_{0};
+  fablab_avoidance::Point last_obstacle_center_;
   std::size_t avoid_end_segment_{0};
   double map_ignore_radius_{0.15};
   bool laser_offset_known_{false};
