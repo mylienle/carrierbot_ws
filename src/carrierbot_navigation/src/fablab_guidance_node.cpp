@@ -114,7 +114,7 @@ public:
     avoid_params_.stop_min_clearance = declare_parameter<double>("stop_min_clearance", 0.3);
     avoid_params_.actuator_delay = declare_parameter<double>("actuator_delay", 0.17);
     avoid_params_.brake_decel = declare_parameter<double>("brake_decel", 0.6);
-    avoid_params_.wall_margin = declare_parameter<double>("avoid_wall_margin", 0.05);
+    avoid_params_.wall_margin = declare_parameter<double>("avoid_wall_margin", 0.2);
     avoid_params_.max_lateral = declare_parameter<double>("avoid_max_lateral", 2.5);
     avoid_params_.switch_radius = goal_radius_;
     sense_distance_ = declare_parameter<double>("sense_distance", 5.0);
@@ -358,6 +358,35 @@ private:
     return false;
   }
 
+  // Occupied static map cells within sense_distance of the robot, appended as wall points. They
+  // come after the scan points, so the obstacle member flags (scan indices) never skip them.
+  void appendMapWalls(
+    const fablab_avoidance::Point & robot, std::vector<fablab_avoidance::Point> & points) const
+  {
+    if (!map_ || map_->info.resolution <= 0.0) {
+      return;
+    }
+    const auto & info = map_->info;
+    const double resolution = info.resolution;
+    const int robot_x = static_cast<int>(std::floor((robot.x - info.origin.position.x) / resolution));
+    const int robot_y = static_cast<int>(std::floor((robot.y - info.origin.position.y) / resolution));
+    const int reach = static_cast<int>(std::ceil(sense_distance_ / resolution));
+    for (int dy = -reach; dy <= reach; ++dy) {
+      for (int dx = -reach; dx <= reach; ++dx) {
+        const int x = robot_x + dx;
+        const int y = robot_y + dy;
+        if (x < 0 || y < 0 || x >= static_cast<int>(info.width) || y >= static_cast<int>(info.height) ||
+          std::hypot(dx, dy) > reach ||
+          map_->data[static_cast<std::size_t>(y) * info.width + x] < 50)
+        {
+          continue;
+        }
+        points.push_back({info.origin.position.x + (x + 0.5) * resolution,
+            info.origin.position.y + (y + 0.5) * resolution});
+      }
+    }
+  }
+
   void resetAvoidance()
   {
     avoid_stop_ = false;
@@ -403,8 +432,12 @@ private:
     if (++avoid_confirm_count_ < avoid_confirm_cycles_) {
       return;
     }
+    // The scan can miss a wall the legs pass (occluded, or a poor return at a distance), so the
+    // legs are also checked against the occupied cells of the static map around the robot
+    std::vector<fablab_avoidance::Point> points = scan_points_;
+    appendMapWalls(robot, points);
     const auto inserted = fablab_avoidance::planAvoidance(
-      obstacle_, scan_points_, robot, start, goal, avoid_side_, avoid_params_);
+      obstacle_, points, robot, start, goal, avoid_side_, avoid_params_);
     if (inserted.empty()) {
       // No pair fits from here (e.g. the robot is still inside a narrow passage). The obstacle is
       // beyond d_brake, so keep following the original path and plan again next cycle; the
