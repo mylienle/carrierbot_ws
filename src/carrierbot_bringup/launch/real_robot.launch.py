@@ -75,6 +75,8 @@ def generate_launch_description():
         "delta_max", default_value="0.8", description="LOS look-ahead maximum (m)")
     kd_arg = DeclareLaunchArgument(
         "KD", default_value="0.7", description="Heading D gain")
+    ki_arg = DeclareLaunchArgument(
+        "KI", default_value="0.1", description="Heading I gain (0 turns the integral off)")
     v_max_arg = DeclareLaunchArgument(
         "v_max", default_value="0.6", description="Speed-level test: cruise and max linear speed (m/s)")
     start_snap_radius_arg = DeclareLaunchArgument(
@@ -240,6 +242,7 @@ def generate_launch_description():
             "delta_min": ParameterValue(LaunchConfiguration("delta_min"), value_type=float),
             "delta_max": ParameterValue(LaunchConfiguration("delta_max"), value_type=float),
             "KD": ParameterValue(LaunchConfiguration("KD"), value_type=float),
+            "KI": ParameterValue(LaunchConfiguration("KI"), value_type=float),
             "linear_speed": ParameterValue(LaunchConfiguration("v_max"), value_type=float),
             "linear_speed_max": ParameterValue(LaunchConfiguration("v_max"), value_type=float),
             "start_snap_radius": ParameterValue(
@@ -316,6 +319,7 @@ def generate_launch_description():
         delta_min_arg,
         delta_max_arg,
         kd_arg,
+        ki_arg,
         start_snap_radius_arg,
         v_max_arg,
         channel_type_arg,
