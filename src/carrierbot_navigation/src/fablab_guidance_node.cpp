@@ -26,12 +26,6 @@
 namespace
 {
 constexpr double kPi = 3.14159265358979323846;
-// A latched avoidance stop is released once d_obs exceeds d_brake by this much (m)
-constexpr double kAvoidReleaseMargin = 0.3;
-// ... for this many consecutive cycles (1 s at 10 Hz), so a detection flicker does not release it
-constexpr int kAvoidReleaseCycles = 10;
-// Largest move of the obstacle centre between cycles still counted as the same estimate (m)
-constexpr double kAvoidCenterJump = 0.25;
 
 double normalizeAngle(double angle)
 {
@@ -120,7 +114,7 @@ public:
     avoid_params_.stop_min_clearance = declare_parameter<double>("stop_min_clearance", 0.3);
     avoid_params_.actuator_delay = declare_parameter<double>("actuator_delay", 0.17);
     avoid_params_.brake_decel = declare_parameter<double>("brake_decel", 0.6);
-    avoid_params_.wall_margin = declare_parameter<double>("avoid_wall_margin", 0.2);
+    avoid_params_.wall_margin = declare_parameter<double>("avoid_wall_margin", 0.05);
     avoid_params_.max_lateral = declare_parameter<double>("avoid_max_lateral", 2.5);
     avoid_params_.switch_radius = goal_radius_;
     sense_distance_ = declare_parameter<double>("sense_distance", 5.0);
@@ -364,42 +358,11 @@ private:
     return false;
   }
 
-  // Occupied static map cells within sense_distance of the robot, appended as wall points. They
-  // come after the scan points, so the obstacle member flags (scan indices) never skip them.
-  void appendMapWalls(
-    const fablab_avoidance::Point & robot, std::vector<fablab_avoidance::Point> & points) const
-  {
-    if (!map_ || map_->info.resolution <= 0.0) {
-      return;
-    }
-    const auto & info = map_->info;
-    const double resolution = info.resolution;
-    const int robot_x = static_cast<int>(std::floor((robot.x - info.origin.position.x) / resolution));
-    const int robot_y = static_cast<int>(std::floor((robot.y - info.origin.position.y) / resolution));
-    const int reach = static_cast<int>(std::ceil(sense_distance_ / resolution));
-    for (int dy = -reach; dy <= reach; ++dy) {
-      for (int dx = -reach; dx <= reach; ++dx) {
-        const int x = robot_x + dx;
-        const int y = robot_y + dy;
-        if (x < 0 || y < 0 || x >= static_cast<int>(info.width) || y >= static_cast<int>(info.height) ||
-          std::hypot(dx, dy) > reach ||
-          map_->data[static_cast<std::size_t>(y) * info.width + x] < 50)
-        {
-          continue;
-        }
-        points.push_back({info.origin.position.x + (x + 0.5) * resolution,
-            info.origin.position.y + (y + 0.5) * resolution});
-      }
-    }
-  }
-
   void resetAvoidance()
   {
     avoid_stop_ = false;
     avoid_end_segment_ = 0;
     avoid_confirm_count_ = 0;
-    avoid_latched_ = false;
-    avoid_release_count_ = 0;
     obstacle_ = fablab_avoidance::Obstacle();
   }
 
@@ -423,55 +386,25 @@ private:
       waypoints_[current_segment_ + 1].first, waypoints_[current_segment_ + 1].second};
     obstacle_ = fablab_avoidance::detectObstacle(
       scan_points_, scan_point_is_new_, robot, start, goal, avoid_params_);
-    const double brake_distance = fablab_avoidance::brakeDistance(last_linear_cmd_, avoid_params_);
-    if (avoid_latched_) {
-      // Once stopped, stay stopped: d_obs jitters around d_brake, and every creep forward brings
-      // the obstacle closer to avoid_self_radius, where its points are dropped and it vanishes.
-      // Release only after the obstacle is gone or clearly beyond d_brake for a while.
-      if (obstacle_.found && obstacle_.surface_distance <= brake_distance + kAvoidReleaseMargin) {
-        avoid_release_count_ = 0;
-      } else {
-        ++avoid_release_count_;
-      }
-      if (avoid_release_count_ < kAvoidReleaseCycles) {
-        avoid_stop_ = true;
-        return;
-      }
-      avoid_latched_ = false;
-      avoid_release_count_ = 0;
-      avoid_confirm_count_ = 0;
-    }
     if (!obstacle_.found || obstacle_.surface_distance >= avoid_params_.avoid_distance) {
       avoid_confirm_count_ = 0;
       return;
     }
-    if (obstacle_.surface_distance <= brake_distance) {
+    if (obstacle_.surface_distance <=
+      fablab_avoidance::brakeDistance(last_linear_cmd_, avoid_params_))
+    {
       avoid_stop_ = true;
-      avoid_latched_ = true;
-      avoid_release_count_ = 0;
       return;
     }
     if (current_segment_ + 1 < avoid_end_segment_) {
       // Already following an avoidance pair: leave it to the stopping monitor
       return;
     }
-    // Plan only on an estimate that has settled: close to the obstacle the nearest point can
-    // switch to another face or a neighbouring object and move the centre by more than 0.5 m
-    if (avoid_confirm_count_ > 0 &&
-      fablab_avoidance::distance(obstacle_.center, last_obstacle_center_) > kAvoidCenterJump)
-    {
-      avoid_confirm_count_ = 0;
-    }
-    last_obstacle_center_ = obstacle_.center;
     if (++avoid_confirm_count_ < avoid_confirm_cycles_) {
       return;
     }
-    // The scan can miss a wall the legs pass (occluded, or a poor return at a distance), so the
-    // legs are also checked against the occupied cells of the static map around the robot
-    std::vector<fablab_avoidance::Point> points = scan_points_;
-    appendMapWalls(robot, points);
     const auto inserted = fablab_avoidance::planAvoidance(
-      obstacle_, points, robot, start, goal, avoid_side_, avoid_params_);
+      obstacle_, scan_points_, robot, start, goal, avoid_side_, avoid_params_);
     if (inserted.empty()) {
       // No pair fits from here (e.g. the robot is still inside a narrow passage). The obstacle is
       // beyond d_brake, so keep following the original path and plan again next cycle; the
@@ -746,9 +679,6 @@ private:
   int avoid_side_{-1};
   int avoid_confirm_cycles_{3};
   int avoid_confirm_count_{0};
-  bool avoid_latched_{false};
-  int avoid_release_count_{0};
-  fablab_avoidance::Point last_obstacle_center_;
   std::size_t avoid_end_segment_{0};
   double map_ignore_radius_{0.15};
   bool laser_offset_known_{false};
