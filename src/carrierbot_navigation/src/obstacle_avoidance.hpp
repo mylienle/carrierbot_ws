@@ -27,7 +27,7 @@ struct Params
   double brake_decel{0.6};       // a_brake, Eq. 20
   // Free space kept between robot body and walls/other scan points. 0.2 rejected every pair
   // beside the static object near WI on B1, so the robot braked instead of avoiding.
-  double wall_margin{0.05};
+  double wall_margin{0.08};
   double cluster_gap{0.15};      // neighbouring scan points closer than this belong to one obstacle
   double max_lateral{2.5};       // largest d_perp tried before the plan is rejected
   double switch_radius{0.5};     // the guidance switches segment this far before a waypoint

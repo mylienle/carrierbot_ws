@@ -120,7 +120,7 @@ public:
     avoid_params_.stop_min_clearance = declare_parameter<double>("stop_min_clearance", 0.3);
     avoid_params_.actuator_delay = declare_parameter<double>("actuator_delay", 0.17);
     avoid_params_.brake_decel = declare_parameter<double>("brake_decel", 0.6);
-    avoid_params_.wall_margin = declare_parameter<double>("avoid_wall_margin", 0.05);
+    avoid_params_.wall_margin = declare_parameter<double>("avoid_wall_margin", 0.08);
     avoid_params_.max_lateral = declare_parameter<double>("avoid_max_lateral", 2.5);
     avoid_params_.switch_radius = goal_radius_;
     sense_distance_ = declare_parameter<double>("sense_distance", 5.0);
