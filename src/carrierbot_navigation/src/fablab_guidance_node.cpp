@@ -404,7 +404,7 @@ private:
   }
 
   // Detection, decision and stopping monitor of the paper (Eq. 19, 20). On a valid plan the
-  // robot pose R, A and B are inserted before the segment goal; the original waypoints are
+  // robot pose R, A1, A2 and B are inserted before the segment goal; the original waypoints are
   // followed again once the segment ending at that goal is active.
   void updateAvoidance()
   {

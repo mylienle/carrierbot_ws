@@ -155,7 +155,7 @@ inline Obstacle detectObstacle(
   return obstacle;
 }
 
-// Waypoints R (robot), A and, when it falls before the goal, B of Eq. 21. Every transition
+// Waypoints R (robot), A1, A2 and, when it falls before the goal, B of Eq. 21. Every transition
 // segment must stay R_safe (Eq. 18) away from the obstacle centre (Eq. 22) and keep the robot
 // body clear of all other scan points. The preferred side sigma is tried first, then the other
 // one; an empty result means the pair is rejected and the robot has to stop instead.
@@ -211,20 +211,43 @@ inline std::vector<Point> planAvoidance(
       return clear(leave, enter);
     };
 
+  // A single A abeam the obstacle makes both diagonal legs cut the R_safe circle, which pushed
+  // d_perp ~0.3 m past R_safe. A1 and A2 sit half_length before and after the obstacle at the
+  // same d_perp, so the robot passes it on a leg parallel to the path; half_length 0 is the
+  // single A of Eq. 21. The smallest d_perp wins, then the shortest parallel leg.
+  const double robot_s = (robot.x - start.x) * ux + (robot.y - start.y) * uy;
   const int sides[2] = {preferred_side >= 0 ? 1 : -1, preferred_side >= 0 ? -1 : 1};
   for (const int sigma : sides) {
     for (double lateral = required; lateral <= params.max_lateral + 1e-9; lateral += 0.05) {
-      // A = c_o + sigma d_perp (-sin pi_p, cos pi_p), Eq. 21
-      const Point a{obstacle.center.x - sigma * lateral * uy,
-        obstacle.center.y + sigma * lateral * ux};
-      if (!clear(robot, a)) {
-        continue;
-      }
-      const bool valid = use_b ?
-        (clear(a, b) && clear(b, goal) && clear_corner(robot, a, b) && clear_corner(a, b, goal)) :
-        (clear(a, goal) && clear_corner(robot, a, goal));
-      if (valid) {
-        return use_b ? std::vector<Point>{robot, a, b} : std::vector<Point>{robot, a};
+      for (double half_length = 0.0; half_length <= r_safe + 1.0 + 1e-9; half_length += 0.1) {
+        // A1 must stay ahead of the robot and A2 before B
+        if (center_s - half_length <= robot_s ||
+          (use_b && half_length >= params.rejoin_distance - params.switch_radius))
+        {
+          break;
+        }
+        // A = c_o + sigma d_perp (-sin pi_p, cos pi_p) +- half_length (cos pi_p, sin pi_p), Eq. 21
+        std::vector<Point> route{robot};
+        for (const double along : {-half_length, half_length}) {
+          route.push_back({obstacle.center.x + along * ux - sigma * lateral * uy,
+              obstacle.center.y + along * uy + sigma * lateral * ux});
+          if (half_length < 1e-9) {
+            break;
+          }
+        }
+        if (use_b) {
+          route.push_back(b);
+        }
+        route.push_back(goal);
+        bool valid = true;
+        for (std::size_t i = 0; valid && i + 1 < route.size(); ++i) {
+          valid = clear(route[i], route[i + 1]) &&
+            (i == 0 || clear_corner(route[i - 1], route[i], route[i + 1]));
+        }
+        if (valid) {
+          route.pop_back();
+          return route;
+        }
       }
     }
   }
