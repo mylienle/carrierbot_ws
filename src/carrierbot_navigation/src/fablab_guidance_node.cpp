@@ -114,9 +114,9 @@ public:
     // Reactive avoidance of the paper (Section V); defaults follow Table I
     avoidance_enabled_ = declare_parameter<bool>("avoidance_enabled", true);
     avoid_params_.robot_radius = declare_parameter<double>("robot_radius", 0.52);
-    avoid_params_.clearance = declare_parameter<double>("avoid_clearance", 0.25);
+    avoid_params_.clearance = declare_parameter<double>("avoid_clearance", 0.1);
     avoid_params_.avoid_distance = declare_parameter<double>("avoid_distance", 2.5);
-    avoid_params_.rejoin_distance = declare_parameter<double>("rejoin_distance", 2.0);
+    avoid_params_.rejoin_distance = declare_parameter<double>("rejoin_distance", 1.5);
     avoid_params_.stop_min_clearance = declare_parameter<double>("stop_min_clearance", 0.3);
     avoid_params_.actuator_delay = declare_parameter<double>("actuator_delay", 0.17);
     avoid_params_.brake_decel = declare_parameter<double>("brake_decel", 0.6);

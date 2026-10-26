@@ -19,9 +19,9 @@ struct Point
 struct Params
 {
   double robot_radius{0.52};     // r_robot
-  double clearance{0.25};        // c_clear
+  double clearance{0.1};         // c_clear
   double avoid_distance{2.5};    // d_avoid, Eq. 19
-  double rejoin_distance{2.0};   // D_r, Eq. 21
+  double rejoin_distance{1.5};   // D_r, Eq. 21
   double stop_min_clearance{0.3};  // s_min, Eq. 20
   double actuator_delay{0.17};   // T_delay, Eq. 20
   double brake_decel{0.6};       // a_brake, Eq. 20
