@@ -3,6 +3,7 @@ import glob
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 from launch.actions import IncludeLaunchDescription, TimerAction, DeclareLaunchArgument, LogInfo
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration, PythonExpression
@@ -66,6 +67,14 @@ def generate_launch_description():
         default_value="nav2",
         description="Navigation controller: nav2 or fablab_los_pd",
     )
+
+    # LOS look-ahead and D gain for the fablab_los_pd tests (fixed delta: delta_min == delta_max)
+    delta_min_arg = DeclareLaunchArgument(
+        "delta_min", default_value="0.5", description="LOS look-ahead minimum (m)")
+    delta_max_arg = DeclareLaunchArgument(
+        "delta_max", default_value="0.8", description="LOS look-ahead maximum (m)")
+    kd_arg = DeclareLaunchArgument(
+        "KD", default_value="0.7", description="Heading D gain")
 
     channel_type_arg = DeclareLaunchArgument(
             'channel_type',
@@ -222,6 +231,11 @@ def generate_launch_description():
         executable="fablab_guidance_node",
         name="fablab_guidance_node",
         output="screen",
+        parameters=[{
+            "delta_min": ParameterValue(LaunchConfiguration("delta_min"), value_type=float),
+            "delta_max": ParameterValue(LaunchConfiguration("delta_max"), value_type=float),
+            "KD": ParameterValue(LaunchConfiguration("KD"), value_type=float),
+        }],
         condition=IfCondition(PythonExpression([
             "'", use_amcl, "' == 'true' and '", guidance_mode, "' == 'fablab_los_pd'"
         ])),
@@ -290,6 +304,9 @@ def generate_launch_description():
         map_arg,
         drive_mode_arg,
         guidance_mode_arg,
+        delta_min_arg,
+        delta_max_arg,
+        kd_arg,
         channel_type_arg,
         serial_port_arg,
         lidar_port_log,
