@@ -105,7 +105,7 @@ public:
     start_alignment_threshold_ = declare_parameter<double>("start_alignment_threshold", 0.35);
     start_alignment_tolerance_ = declare_parameter<double>("start_alignment_tolerance", 0.20);
     start_alignment_angular_speed_ = declare_parameter<double>("start_alignment_angular_speed", 0.25);
-    danger_distance_ = declare_parameter<double>("danger_distance", 0.6);
+    danger_distance_ = declare_parameter<double>("danger_distance", 0.55);
     safety_enabled_ = declare_parameter<bool>("safety_enabled", true);
     pose_topic_ = declare_parameter<std::string>("pose_topic", "/amcl_pose");
     initial_pose_topic_ = declare_parameter<std::string>("initial_pose_topic", "/initialpose");
@@ -260,10 +260,12 @@ private:
   void appendWaypoint(double waypoint_x, double waypoint_y)
   {
     // The GUI currently includes its current pose as the first route element.
-    // The original Fablab node adds that start point itself, so ignore only an
-    // exact-near duplicate to prevent a zero-length first segment.
+    // The original Fablab node adds that start point itself, so ignore it when it lies
+    // within goal_radius: it would be reached at once, but the robot first turned towards
+    // it (often behind) and swung 0.3 m off the next leg on B1.
     if (waypoints_.size() == 1 &&
-      std::hypot(waypoint_x - waypoints_.front().first, waypoint_y - waypoints_.front().second) < 0.05)
+      std::hypot(waypoint_x - waypoints_.front().first, waypoint_y - waypoints_.front().second) <
+      goal_radius_)
     {
       RCLCPP_INFO(get_logger(), "Ignoring duplicate route start waypoint");
       return;
@@ -744,7 +746,7 @@ private:
   double start_alignment_threshold_{0.35};
   double start_alignment_tolerance_{0.20};
   double start_alignment_angular_speed_{0.25};
-  double danger_distance_{0.6};
+  double danger_distance_{0.55};
   bool safety_enabled_{true};
   bool safety_stop_{false};
   bool avoidance_enabled_{true};
