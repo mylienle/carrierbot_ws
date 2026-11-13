@@ -6,60 +6,7 @@ import math
 from pathlib import Path
 import statistics
 
-from fablab_route import finite, xy
 from fusion_fixture import HEAD_ON_SCENARIOS, OCCLUDED_SCENARIO, STANDING_SCENARIO
-
-
-def outline_gaps(robot, yaw, person, proxy_radius):
-    """Planar collision shapes from the standing test's robot_hd720.urdf."""
-    dx, dy = person[0]-robot[0], person[1]-robot[1]
-    c, s = math.cos(yaw), math.sin(yaw)
-    x, y = c*dx+s*dy, -s*dx+c*dy
-
-    def box_distance(offset_y, half_x, half_y):
-        qx, qy = abs(x)-half_x, abs(y-offset_y)-half_y
-        return math.hypot(max(qx, 0.), max(qy, 0.))+min(max(qx, qy), 0.)
-
-    wheel_distance = min(box_distance(.285, .10, .025), box_distance(-.285, .10, .025))
-    body_distance = min(wheel_distance, box_distance(0., .25, .25), math.hypot(x+7./24., y)-.05)
-    return wheel_distance-proxy_radius, body_distance-proxy_radius
-
-
-def standing_outline_review(records, proxy_radius):
-    nearest_body = nearest_wheel = None
-    interpolated_bound = None
-    valid_samples = intervals = 0
-    previous = None
-    for row in records:
-        truth, route = row.get("scoring_only", {}), row.get("route", {})
-        robot, person = truth.get("robot_truth"), truth.get("person_truth")
-        pose = route.get("robot_pose_map", [])
-        if not (xy(robot) and xy(person) and isinstance(pose, list) and len(pose) == 3
-                and finite(pose[2]) and route.get("pose_tf_valid") is True):
-            previous = None
-            continue
-        valid_samples += 1
-        yaw = pose[2]
-        wheel_gap, body_gap = outline_gaps(robot, yaw, person, proxy_radius)
-        nearest_wheel = wheel_gap if nearest_wheel is None else min(nearest_wheel, wheel_gap)
-        if nearest_body is None or body_gap < nearest_body["gap_m"]:
-            nearest_body = dict(gap_m=body_gap, sim=row["sim"], robot_xy_m=robot,
-                                robot_yaw_rad=yaw, current_segment=route.get("current_segment"))
-        if previous is not None and row["sim"] > previous[0]:
-            _, old_robot, old_yaw, old_person, old_gap = previous
-            # Under linear pose interpolation, the nearest endpoint is within
-            # half the motion bound. 0.36 m encloses the projected collision parts.
-            yaw_delta = math.remainder(yaw-old_yaw, 2.*math.pi)
-            motion = math.dist(robot, old_robot)+math.dist(person, old_person)+.36*abs(yaw_delta)
-            bound = min(body_gap, old_gap)-.5*motion
-            interpolated_bound = bound if interpolated_bound is None else min(interpolated_bound, bound)
-            intervals += 1
-        previous = (row["sim"], robot, yaw, person, body_gap)
-    return dict(reference_gap_m=.30, closest_outline_sample=nearest_body,
-                minimum_outer_drive_wheel_gap_m=nearest_wheel,
-                minimum_interpolated_outline_lower_bound_m=interpolated_bound,
-                samples_with_valid_yaw=valid_samples, total_samples=len(records), evaluated_intervals=intervals,
-                method="Gazebo planar positions, map TF heading and projected URDF collision shapes; offline estimate only")
 
 
 def analyze(directory):
@@ -74,7 +21,6 @@ def analyze(directory):
     after_three = defaultdict(float)
     baseline_commands_after_three = []
     first_block_pose = None
-    lidar_block_samples = {}
     head_on = summary.get("scenario") in HEAD_ON_SCENARIOS
     occluded = summary.get("scenario") == OCCLUDED_SCENARIO
     standing = summary.get("scenario") == STANDING_SCENARIO
@@ -112,14 +58,6 @@ def analyze(directory):
                 first_forward_after_clear = row["sim"]
         if decision.get("reason") == "LIDAR_CORRIDOR_BLOCKED" and first_block_pose is None:
             first_block_pose = pose
-        raw = decision.get("raw_corridor", {})
-        if raw.get("blocked") is True and "blocking_evidence" in raw:
-            sample = dict(sim=row["sim"], scan_stamp=raw.get("stamp"), route_revision=route.get("route_revision"),
-                          points_triggering_stop=raw["blocking_points"],
-                          nearest_clearance_m=raw["nearest_forward_corridor_clearance_m"],
-                          **raw["blocking_evidence"])
-            lidar_block_samples.setdefault("first", sample)
-            lidar_block_samples["last"] = sample
         if (isinstance(pose, list) and pose[0] >= 3. and decision.get("action") == "BASELINE"
                 and isinstance(command, list)):
             baseline_commands_after_three.append(abs(command[0]))
@@ -163,7 +101,6 @@ def analyze(directory):
         yield_clearance_m=summary.get("yield_clearance_m"),
         yield_clearance_reference=summary.get("yield_clearance_reference"),
         rows=len(records), first_lidar_block_pose_map=first_block_pose,
-        lidar_block_samples=lidar_block_samples,
         resume_profile=summary.get("resume_profile", "standard"),
         caution_max_clearance_m=summary.get("caution_max_clearance_m"),
         clear_cruise_enabled=summary.get("clear_cruise_enabled", False),
@@ -225,12 +162,6 @@ def analyze(directory):
             bypass_to_arrival_sim_s=(arrival-bypass if arrival is not None and bypass is not None else None),
             max_abs_lateral_map_m=max_lateral, planned_max_abs_lateral_map_m=planned_max_lateral,
             last_trace_robot_pose_map=records[-1].get("route", {}).get("robot_pose_map") if records else None)
-        fixture_path = directory / "fixture_config.json"
-        if fixture_path.is_file():
-            fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
-            proxy_radius = fixture.get("proxy_radius_m")
-            if fixture.get("scenario") == STANDING_SCENARIO and finite(proxy_radius) and proxy_radius > 0.:
-                report["standing_blocker"]["outline_clearance"] = standing_outline_review(records, proxy_radius)
     return report
 
 

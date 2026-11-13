@@ -14,15 +14,12 @@ import tempfile
 import time
 import threading
 
-from analyze_huan_run import outline_gaps
 from fablab_route import finite
-from fusion_fixture import (ACTOR, GOAL_LATE_LIMIT, HEAD_ON_SCENARIOS, MODE, NARROW_DETOUR_WALL_MARGIN_M,
-                            OCCLUDED_SCENARIO, PROXY, SCENARIOS, STANDING_CENTER_GAPS_M,
-                            STANDING_CLOSE_PASS_GAP_M, STANDING_GOAL_X, STANDING_SCENARIO, TOOLSET,
-                            CrossingTiming, factory_arguments, insertion_report)
-from huan_fusion_bridge import STANDING_LASER_RESERVE_M
-from huan_fusion_policy import (CRAWL_COMMAND_CAP_MPS, ClosePassMonitor, IntegratedFusionPolicy,
-                                StationaryBlocker, identify_input_wait, stabilize_standing_detour_release)
+from fusion_fixture import (ACTOR, HEAD_ON_SCENARIOS, MODE, NARROW_DETOUR_WALL_MARGIN_M,
+                            OCCLUDED_SCENARIO, PROXY, SCENARIOS, STANDING_CENTER_GAPS_M, STANDING_GOAL_X,
+                            STANDING_SCENARIO, TOOLSET, CrossingTiming, factory_arguments, insertion_report)
+from huan_fusion_policy import (IntegratedFusionPolicy, StationaryBlocker, identify_input_wait,
+                                stabilize_standing_detour_release)
 from fusion_yield_policy import NEARBY_SLOW_CLEARANCE_M
 from huan_trial_scoring import comparison_score, encounter_score, observe_occlusion, observe_standing_blocker
 from huan_cpu_metadata import configure_runtime_threads
@@ -30,38 +27,6 @@ from huan_cpu_metadata import configure_runtime_threads
 
 ROBOT_SCORING_RADIUS_M = .52
 PERSON_PROXY_RADIUS_M = .25
-
-
-def fresh_wheel_speed(sample, sim, wall):
-    if sample is None:
-        return None
-    stamp, received, speed = sample
-    if 0 <= sim-stamp <= .25 and 0 <= wall-received <= .4 and finite(speed) and speed >= 0.:
-        return speed
-    return None
-
-
-def synchronized_goal_ready(target, clock_snapshot, inputs_ready, route_ready, report):
-    """Keep the sensor history live and dispatch only inside the fixture's existing window."""
-    stamp_ns, _, fresh = clock_snapshot()
-    report["clock_fresh"] = fresh
-    if not fresh:
-        return False
-    sim = stamp_ns * 1e-9
-    if sim > target + GOAL_LATE_LIMIT:
-        raise RuntimeError("Missed the synchronized goal slot; see goal_slot_preflight in summary.json")
-    # A preflight that passed several seconds ago can no longer supply a live sensor history.
-    ready = inputs_ready()
-    if sim < target:
-        return False
-    route_ok = route_ready()
-    stamp_ns, _, fresh = clock_snapshot()
-    checked_at = stamp_ns * 1e-9
-    report.update(clock_fresh=fresh, sensor_inputs_ready=ready, command_route_ready=route_ok,
-                  checked_at_sim_s=checked_at)
-    if fresh and checked_at > target + GOAL_LATE_LIMIT:
-        raise RuntimeError("Missed the synchronized goal slot; see goal_slot_preflight in summary.json")
-    return fresh and target <= checked_at and ready and route_ok
 
 
 def prepare_vision(vision, tools, output, velocity_profile="original", vision_threads=1, *,
@@ -141,6 +106,8 @@ class TrialScore:
             self.since, self.last_action = now, action
             self.wait_origin, self.wait_route = None, None
             self.wait_planning_revision = None
+        if action == "WAIT" and decision.get("standing_detour_request") is not None:
+            self.wait_planning_revision = decision.get("route_revision")
         blocked = decision["reason"] == "LIDAR_CORRIDOR_BLOCKED"
         if blocked and self.first_block_xy is None:
             self.first_block_xy = list(robot_truth)
@@ -166,9 +133,6 @@ class TrialScore:
             if self.wait_max_drift > .03:
                 raise RuntimeError("Robot drifted over 3 cm during a settled WAIT")
             self.lidar_wait_samples += int(blocked)
-        if action == "WAIT" and (decision.get("standing_detour_request") is not None
-                                 or decision.get("close_pass_replan_request") is not None):
-            self.wait_planning_revision = decision.get("route_revision")
         if action == "SLOW" and now-self.since >= .4:
             uv = route.get("command_preview", {}).get("linear_x", float("inf"))
             if abs(v) > .061 or abs(uv) > .061:
@@ -209,10 +173,6 @@ def main():
                         help="Experimental 2.0 m body-to-obstacle clearance bound for caution only")
     parser.add_argument("--standing-detour", action="store_true",
                         help="Allow Fablab to prepare a detour during WAIT for a matched stationary person")
-    parser.add_argument("--reduced-standing-laser-reserve", action="store_true",
-                        help="Test a nominal 0.50 m reserve for continuously tracked slow laser obstacles during a detour")
-    parser.add_argument("--crawl-on-predicted-conflict", action="store_true",
-                        help="Test a capped slow release if Huân predicts the detour is clear at crawl speed")
     parser.add_argument("--velocity-profile", choices=("original", "huan-responsive", "cpu-sparse"), default="original")
     parser.add_argument("--vision-threads", type=int, choices=(1, 2), default=1)
     parser.add_argument("--reliable-rgbd", action="store_true",
@@ -225,10 +185,6 @@ def main():
         parser.error("--nearby-slow requires camera-based caution")
     if args.standing_detour and (args.mode != "huan" or args.input_only):
         parser.error("--standing-detour requires an active --mode huan trial")
-    if args.reduced_standing_laser_reserve and (args.scenario != STANDING_SCENARIO or not args.standing_detour):
-        parser.error("--reduced-standing-laser-reserve requires --scenario standing-blocker --standing-detour")
-    if args.crawl_on_predicted_conflict and (args.scenario != STANDING_SCENARIO or not args.standing_detour):
-        parser.error("--crawl-on-predicted-conflict requires --scenario standing-blocker --standing-detour")
     head_on = args.scenario in HEAD_ON_SCENARIOS
     occluded = args.scenario == OCCLUDED_SCENARIO
     standing = args.scenario == STANDING_SCENARIO
@@ -236,7 +192,6 @@ def main():
     from rclpy.executors import MultiThreadedExecutor
     from gazebo_msgs.msg import ModelStates
     from geometry_msgs.msg import PoseStamped, Twist
-    from nav_msgs.msg import Odometry
     from rclpy.qos import QoSProfile, DurabilityPolicy, ReliabilityPolicy, qos_profile_sensor_data
     from std_msgs.msg import Bool, Float64MultiArray, String
     from tf2_ros import Buffer, TransformException, TransformListener
@@ -257,7 +212,7 @@ def main():
     trace = (output/"trace.jsonl").open("w", encoding="utf-8")
     sensors = FusionSensors(node, buffer, tracks, clock=clock_feed.seconds, fusion=args.mode == "huan")
     state = {"config": None, "fixture": None, "fixture_wall": 0., "command": [0., 0.],
-             "command_wall": 0., "truth_wall": 0., "truth": {}, "arrived": False, "wheel_odometry": None}
+             "command_wall": 0., "truth_wall": 0., "truth": {}, "arrived": False}
     def dictionary(message, key):
         try:
             value = json.loads(message.data)
@@ -267,11 +222,6 @@ def main():
             pass
     def wheel(message):
         state.update(command=[message.linear.x, message.angular.z], command_wall=time.monotonic())
-    def wheel_odometry(message):
-        linear = message.twist.twist.linear
-        sample = message.header.stamp
-        state["wheel_odometry"] = (sample.sec + sample.nanosec * 1e-9, time.monotonic(),
-                                    math.hypot(linear.x, linear.y))
     def truth(message):
         positions = {name: [p.position.x, p.position.y] for name, p in zip(message.name, message.pose)}
         sim_stamp, _, fresh = clock_feed.snapshot()
@@ -283,7 +233,6 @@ def main():
                          QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)),
         node.create_subscription(String, "/test_fixture/person_lidar_status", lambda m: dictionary(m, "fixture"), 1),
         node.create_subscription(Twist, "/carrierbot_controller/cmd_vel_unstamped", wheel, 1),
-        node.create_subscription(Odometry, "/odom", wheel_odometry, qos_profile_sensor_data),
         node.create_subscription(ModelStates, "/gazebo/model_states", truth, qos_profile_sensor_data),
         node.create_subscription(Bool, "/behavior_gate/arrival", lambda m: state.update(arrived=bool(m.data)), 1)]
     directive = node.create_publisher(Float64MultiArray, "/dynamic_behavior/directive", 1)
@@ -320,12 +269,6 @@ def main():
         result["scope"] = "One person enters and remains standing in the middle of the route"
         result["standing_blocker"] = {"robot_advance_before_actor_motion_m": 0.,
                                       "samples_standing_in_lane": 0, "samples_outside_lane_after_entry": 0}
-    if args.reduced_standing_laser_reserve:
-        result["standing_laser_reserve"] = dict(nominal_m=STANDING_LASER_RESERVE_M,
-                                                applied_samples=0, original_conflict_cleared_samples=0)
-    if args.crawl_on_predicted_conflict:
-        result["crawl_forecast"] = dict(command_cap_mps=CRAWL_COMMAND_CAP_MPS, checked_samples=0,
-                                       clear_samples=0, slow_directive_samples=0)
     score = TrialScore()
     def now():
         return clock_feed.seconds()
@@ -372,10 +315,10 @@ def main():
                                    stderr=subprocess.STDOUT, start_new_session=True)
         children.append((label, process))
         return process
-    def spin_wait(predicate, seconds, label, *, poll_seconds=.05):
+    def spin_wait(predicate, seconds, label):
         deadline, sent = time.monotonic()+seconds, 0.
         while time.monotonic() < deadline:
-            pump(poll_seconds)
+            pump(.05)
             if time.monotonic()-sent >= .1:
                 send()
                 sent = time.monotonic()
@@ -390,9 +333,6 @@ def main():
     print("MODE: %s | VELOCITY FILTER: %s | CPU THREADS: %d | same Fablab/guard limits 0.12/0.06 m/s" %
           (args.mode, args.velocity_profile, args.vision_threads), flush=True)
     print("RESUME PROFILE: "+args.resume_profile, flush=True)
-    if args.reduced_standing_laser_reserve:
-        print("DU PHONG DU BAO KHI NE: %.2f m + bu tuoi scan; chi track LiDAR gan dung yen." %
-              STANDING_LASER_RESERVE_M, flush=True)
     if args.nearby_slow:
         print("VUNG GIAM TOC: toi da %.1f m khoang ho theo mo hinh." % NEARBY_SLOW_CLEARANCE_M, flush=True)
     if args.input_only:
@@ -424,8 +364,6 @@ def main():
         (output/"integration_manifest.json").write_bytes((tools/"integration_manifest.json").read_bytes())
         (output/"huan_source_manifest.json").write_bytes((tools/"huan_fusion_vendor/manifest.json").read_bytes())
         session = json.loads(Path(config["startup_session_file"]).read_text(encoding="utf-8"))
-        if session.get("sim_lidar_rate_hz") is not None:
-            result["sim_lidar_rate_hz"] = session["sim_lidar_rate_hz"]
         result["clear_cruise_enabled"] = session.get("clear_cruise_enabled") is True
         result["yield_before_detour"] = session.get("yield_before_detour") is True
         result["compact_standing_detour"] = session.get("compact_standing_detour") is True
@@ -443,36 +381,6 @@ def main():
             raise RuntimeError("--standing-detour requires a session started with --yield-before-detour")
         if args.standing_detour and "standing_detour_active" not in sensors.route.latest:
             raise RuntimeError("Restart from the shared launcher to build standing-detour support")
-        close_pass = center_gap == STANDING_CLOSE_PASS_GAP_M
-        if close_pass:
-            result["phase"] = "wheel_odometry_preflight"
-            result["standing_close_pass"] = {
-                "reference_outline_gap_m": .30,
-                "minimum_sampled_outline_gap_m": None,
-                "valid_outline_samples": 0,
-                "detour_monitor_counts": Counter(),
-                "route_revalidations": 0,
-                "replan_request_samples": 0,
-                "replans_observed": 0,
-                "resumes_after_short_track_gap": 0,
-                "standing_history_preserved_samples": 0,
-                "standing_route_resumes_on_two_scans": 0,
-                "checked_standing_route_samples": 0,
-                "standing_route_check_status_counts": Counter(),
-                "fresh_wheel_odometry_samples": 0,
-                "matched_cluster_cleared_raw_stop_samples": 0,
-                "stationary_geometry_cleared_fusion_conflict_samples": 0,
-            }
-            def wheel_odometry_ready():
-                sample = state["wheel_odometry"]
-                sim, wall = now(), time.monotonic()
-                speed = fresh_wheel_speed(sample, sim, wall)
-                if speed is None:
-                    return False
-                result["first_fresh_wheel_odometry"] = dict(sim=sim, speed_mps=speed)
-                return True
-            spin_wait(wheel_odometry_ready, 6., "fresh wheel odometry on /odom; no waypoint sent")
-            print("DA NHAN VAN TOC BANH XE TU /odom.", flush=True)
         if standing and config.get("goal_map") != [STANDING_GOAL_X, 0.]:
             raise RuntimeError("Restart from the shared launcher for the standing-blocker goal with rejoin space")
         if args.scenario == "head-on-narrow":
@@ -608,9 +516,7 @@ def main():
                 from huan_fusion_vendor.base_handoff import still_plan
                 robot = sensors.robot()
                 x, y = robot["x"], robot["y"]
-                raw = sensors.raw_corridor({"route_corridor_xy_m": [[x, y], [x+3., y]]}, robot)
-                if raw.get("valid") is not True:
-                    raise ValueError("INVALID_RAW_SCAN_GEOMETRY: "+str(raw.get("reason")))
+                sensors.raw_corridor({"route_corridor_xy_m": [[x, y], [x+3., y]]}, robot)
                 plan = still_plan([x, y, robot["yaw"]], now())
                 fused = sensors.fused(plan, robot)
                 ready_now = fused["assessment"]["valid"] and "vision_rgbd_tf" in fused["sources"]
@@ -618,9 +524,7 @@ def main():
                     fusion_ready_images.add(fused["camera_image_stamp"])
                 result["fusion_preflight"] = dict(valid_camera_images=len(fusion_ready_images),
                     last_status=fused["status"], diagnostic=fused["diagnostic"],
-                    valid_velocity_tracks=len(sensors.velocities), sources=fused["sources"],
-                    camera_image_stamp=fused["camera_image_stamp"], camera_age_sim_s=fused["camera_age_sim_s"],
-                    scan_stamp=fused["scan_stamp"])
+                    valid_velocity_tracks=len(sensors.velocities))
                 return ready_now and len(fusion_ready_images) >= 2
             except (ValueError, TransformException) as exception:
                 result["fusion_preflight"] = dict(valid_camera_images=len(fusion_ready_images), error=str(exception))
@@ -643,22 +547,20 @@ def main():
             result["phase"] = "scheduled_goal"
             spin_wait(lambda: crossing_timing.goal_target is not None, 4., "initial actor pose and clock")
             target = crossing_timing.goal_target
+            print("DANG CHO MOC GUI DICH DONG BO: %.3f s mo phong." % target, flush=True)
+            spin_wait(lambda: clock_feed.snapshot()[2] and now() >= target,
+                      35., "synchronized simulation goal slot")
+            if not paired_ready() or not graph():
+                raise RuntimeError("Required inputs or command route unavailable at the goal slot")
             goal = config["goal_map"]
-            message = PoseStamped()
-            message.header.frame_id = "map"
-            message.pose.orientation.w = 1.
-            message.pose.position.x, message.pose.position.y = goal
-            goal_preflight = dict(target_sim_s=target, latest_allowed_sim_s=target+GOAL_LATE_LIMIT)
-            result["goal_slot_preflight"] = goal_preflight
-            print("DANG CHO MOC GUI DICH DONG BO: %.3f s mo phong; tiep tuc cap nhat cam bien." % target,
-                  flush=True)
-            spin_wait(lambda: synchronized_goal_ready(target, clock_feed.snapshot, paired_ready, graph,
-                                                       goal_preflight),
-                      35., "synchronized simulation goal slot", poll_seconds=.02)
             start = sensors.robot("map")
             initial_truth = list(state["truth"]["carrierbot"])
             if math.hypot(start["x"], start["y"]) > .20:
                 raise RuntimeError("The trial expects a newly spawned robot at the origin")
+            message = PoseStamped()
+            message.header.frame_id = "map"
+            message.pose.orientation.w = 1.
+            message.pose.position.x, message.pose.position.y = goal
             goal_stamp_ns, _, fresh = clock_feed.snapshot()
             if not fresh:
                 raise RuntimeError("Simulation clock unavailable at the goal slot")
@@ -671,12 +573,8 @@ def main():
             print("DA GUI 1 DICH (%g, %g). Bat dau quyet dinh bang cam bien." % tuple(goal), flush=True)
             setup_matches = set(sensors.matches)
             policy = IntegratedFusionPolicy(args.mode, resume_fresh_scans=args.resume_profile == "fresh-scans",
-                                            nearby_slow=args.nearby_slow,
-                                            reduced_standing_laser_reserve=args.reduced_standing_laser_reserve,
-                                            crawl_on_predicted_conflict=args.crawl_on_predicted_conflict)
+                                            nearby_slow=args.nearby_slow)
             blocker_tracker = StationaryBlocker() if args.standing_detour else None
-            close_monitor = ClosePassMonitor() if close_pass else None
-            pending_replan = None
             fusion_start = sensors.huan.summary() if sensors.huan is not None else {}
             result["phase"] = "mission"
             result["navigation_evaluated"] = True
@@ -717,11 +615,6 @@ def main():
                 points = snapshot.get("waypoints_map", [])
                 if not points or math.dist(points[-1], goal) > .001:
                     raise RuntimeError("Original mission goal lost or replaced")
-                if pending_replan is not None and snapshot["route_revision"] > pending_replan[0]:
-                    if (snapshot["route_revision"] == pending_replan[0]+1
-                            and snapshot["standing_detour_active"] is True and points != pending_replan[1]):
-                        result["standing_close_pass"]["replans_observed"] += 1
-                    pending_replan = None
                 current, error, fusion = None, None, None
                 intent, raw, observations, input_error, input_stage = None, {"valid": False}, [], None, "clock"
                 try:
@@ -763,26 +656,13 @@ def main():
                     raw = {"valid": False, "reason": input_error}
                     if gap_since is None:
                         gap_since = wall
-                odom = state["wheel_odometry"]
                 decision_sim, decision_wall = now(), time.monotonic()
                 transient_gap = ((input_stage == "route_intent" and input_error in
                                   ("ROUTE_STREAM_NOT_READY", "ROUTE_OR_SOURCE_POSE_NOT_READY"))
                                  or (input_stage == "scan_tf" and input_error is not None
                                      and input_error.startswith("NO_FRESH_TIME_MATCHED_SCAN:")))
-                measured_speed = fresh_wheel_speed(odom, decision_sim, decision_wall)
                 decision = policy.evaluate(decision_sim, intent, raw, observations, fusion,
-                                           transient_gap=transient_gap, measured_speed_mps=measured_speed,
-                                           close_monitor=close_monitor,
-                                           match_blocking_returns=sensors.matched_blocking_returns)
-                risk = decision.get("fusion_assessment", {})
-                crawl = decision.get("crawl_forecast")
-                baseline_risk = crawl["nominal_baseline_risk"] if crawl else risk.get("baseline_risk")
-                nominal_risk = crawl["nominal_risk"] if crawl else risk.get("risk")
-                if baseline_risk is not None:
-                    evidence = result["standing_laser_reserve"]
-                    evidence["applied_samples"] += 1
-                    if baseline_risk == "POTENTIAL_COLLISION" and nominal_risk == "CLEAR_WITHIN_MODEL":
-                        evidence["original_conflict_cleared_samples"] += 1
+                                           transient_gap=transient_gap)
                 decision = identify_input_wait(decision, input_stage, input_error)
                 blocker = None
                 if blocker_tracker is not None:
@@ -791,42 +671,14 @@ def main():
                         result.setdefault("first_standing_approach_hold_sim_s", decision_sim)
                         policy.base.reset_clearance()
                     if blocker is not None:
-                        if close_monitor is not None:
-                            close_monitor.arm(blocker)
                         result.setdefault("first_standing_detour_request_sim_s", decision_sim)
                         result.setdefault("first_standing_detour_request_center_distance_m",
                                           blocker["center_distance_m"])
                         decision.update(action="WAIT", action_code=0, speed_cap_mps=0.,
                                         reason="PLANNING_AROUND_STANDING_PERSON",
                                         standing_detour_request=blocker)
-                    decision_route = intent["route_snapshot"] if intent is not None else snapshot
-                    detour_active = (snapshot["standing_detour_active"] is True
-                                     or decision_route.get("standing_detour_active") is True)
-                    if detour_active:
+                    if snapshot["standing_detour_active"] is True:
                         result.setdefault("first_standing_detour_seen_sim_s", decision_sim)
-                    if close_monitor is not None and (detour_active or close_monitor.motion_check_pending):
-                        policy.check_close_pass(close_monitor, decision_sim, decision, fusion, intent)
-                        evidence = result["standing_close_pass"]
-                        evidence["detour_monitor_counts"][decision["close_pass_monitor"]] += 1
-                        evidence["route_revalidations"] += int(decision.get("close_pass_route_revalidated") is True)
-                        evidence["resumes_after_short_track_gap"] += int("close_pass_resume" in decision)
-                        evidence["standing_history_preserved_samples"] += int("standing_history_preserved" in decision)
-                        evidence["standing_route_resumes_on_two_scans"] += int("standing_route_resume_scans" in decision)
-                        evidence["fresh_wheel_odometry_samples"] += int(measured_speed is not None)
-                        status = decision.get("standing_route_check_status")
-                        if status is not None:
-                            evidence["standing_route_check_status_counts"][status] += 1
-                        checked = decision.get("standing_route_check")
-                        if checked is not None:
-                            evidence["checked_standing_route_samples"] += 1
-                            evidence["matched_cluster_cleared_raw_stop_samples"] += int("matched_blocking_returns" in checked)
-                            evidence["stationary_geometry_cleared_fusion_conflict_samples"] += int(
-                                checked.get("original_fusion_risk") == "POTENTIAL_COLLISION" and
-                                decision["fusion_assessment"]["risk"] == "CLEAR_WITHIN_MODEL")
-                        replan = decision.get("close_pass_replan_request")
-                        if replan is not None:
-                            pending_replan = (decision["route_revision"], decision_route["waypoints_map"])
-                            evidence["replan_request_samples"] += 1
                 decision = stabilize_standing_detour_release(decision, intent)
                 if post_pass_cruise and decision["action"] == "BASELINE" and intent is not None:
                     standing_cap = intent["standing_detour_speed_cap_mps"]
@@ -839,16 +691,10 @@ def main():
                         result.get("post_pass_cruise_max_guard_command_mps", 0.), guard_speed)
                     if guard_speed > .061:
                         result.setdefault("first_post_pass_cruise_sim_s", decision_sim)
-                if crawl:
-                    evidence = result["crawl_forecast"]
-                    evidence["checked_samples"] += 1
-                    evidence["clear_samples"] += int(crawl["selected"])
-                    evidence["slow_directive_samples"] += int(decision["reason"] == "HUAN_FUSION_CLEAR_AT_CRAWL")
                 result["sensor_decision_evaluated"] = True
                 result["actuation"] = result["actuation"] or any(abs(v) > .001 for v in state["command"])
-                planning_request = blocker or decision.get("close_pass_replan_request")
                 send(decision["action_code"], decision["speed_cap_mps"], decision["route_revision"],
-                     planning_request["center_map"] if planning_request is not None else None)
+                     blocker["center_map"] if blocker is not None else None)
                 score.observe(decision_sim, decision, snapshot, state["command"], state["truth"]["carrierbot"], state["truth"][ACTOR])
                 row = {"sim": decision_sim, "wall": decision_wall, "tick_started_wall": wall,
                        "tick_compute_wall_s": decision_wall-wall, "decision": decision, "fusion": fusion,
@@ -859,10 +705,6 @@ def main():
                        "input_error": input_error, "input_stage": input_stage if input_error else None,
                        "scoring_only": {"robot_truth": state["truth"]["carrierbot"],
                                                                     "person_truth": state["truth"][ACTOR]}}
-                if close_pass:
-                    row["wheel_odometry"] = {"speed_mps": measured_speed,
-                                             "age_sim_s": decision_sim-odom[0] if odom is not None else None,
-                                             "age_wall_s": decision_wall-odom[1] if odom is not None else None}
                 trace.write(json.dumps(row)+"\n")
                 trace.flush()
                 if occluded:
@@ -871,17 +713,6 @@ def main():
                 if standing:
                     observe_standing_blocker(result["standing_blocker"], row, initial_truth,
                                              crossing_timing.motion, crossing_timing.center)
-                if close_pass:
-                    pose = snapshot.get("robot_pose_map") or []
-                    if snapshot.get("pose_tf_valid") is True and len(pose) == 3 and finite(pose[2]):
-                        # Simulator positions and the URDF outline are used only for scoring.
-                        _, outline_gap = outline_gaps(row["scoring_only"]["robot_truth"], pose[2],
-                                                      row["scoring_only"]["person_truth"], PERSON_PROXY_RADIUS_M)
-                        evidence = result["standing_close_pass"]
-                        evidence["valid_outline_samples"] += 1
-                        minimum = evidence["minimum_sampled_outline_gap_m"]
-                        if minimum is None or outline_gap < minimum:
-                            evidence["minimum_sampled_outline_gap_m"] = outline_gap
                 if (decision["reason"] != last_reason and wall-last_print >= 1.) or wall-last_print >= 10.:
                     last_reason, last_print = decision["reason"], wall
                     location = "xe (%.2f, %.2f) con %.2f m" % (current["x"], current["y"], error) if current else "dang cho TF vi tri moi"
@@ -931,9 +762,6 @@ def main():
                     extra_checks["standing_detour_applied"] = "first_standing_detour_seen_sim_s" in result
                 if post_pass_cruise:
                     extra_checks["post_pass_speed_above_0_06_observed"] = "first_post_pass_cruise_sim_s" in result
-                if close_pass:
-                    minimum = result["standing_close_pass"]["minimum_sampled_outline_gap_m"]
-                    extra_checks["sampled_outline_clearance_at_least_0_30_m"] = minimum is not None and minimum >= .30
             if head_on or occluded or standing:
                 result.update(encounter_score(metrics, extra_checks, scenario=args.scenario))
                 if standing:

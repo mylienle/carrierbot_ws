@@ -10,10 +10,6 @@ from huan_dynamic_obstacles import assess
 
 
 NEARBY_SLOW_CLEARANCE_M = 2.0
-RELEASE_INTENT_MAX_AGE_S = .30
-BLOCKING_POINT_SAMPLE_LIMIT = 24
-# A forecast still covers two seconds when the decision follows the plan timestamp.
-RELEASE_PLAN_LOOKAHEAD_S = 2.0 + RELEASE_INTENT_MAX_AGE_S + .001
 
 
 def within_slow_zone(center, corridor, radius, max_clearance=None):
@@ -43,8 +39,7 @@ def release_intent(plan):
         speed = min(speed, standing_cap)
     result = dict(plan)
     result.update(kind="fablab_release_intent_nominal_timing", route_revision=revision,
-                  positions=nominal_positions(plan["route_geometry_odom_m"], speed,
-                                              horizon=RELEASE_PLAN_LOOKAHEAD_S),
+                  positions=nominal_positions(plan["route_geometry_odom_m"], speed),
                   speed_assumption_mps=speed, counterfactual_release_intent=True,
                   standing_detour_speed_cap_mps=standing_cap,
                   timing_model="nominal_motion_if_released_now_not_a_command",
@@ -52,7 +47,7 @@ def release_intent(plan):
     return result
 
 
-def raw_route_corridor(points_odom, robot_xy, corridor, valid_returns, yield_clearance_m=None, *, blocking_hits=None):
+def raw_route_corridor(points_odom, robot_xy, corridor, valid_returns, yield_clearance_m=None):
     """A forward point corridor, not a general obstacle shape estimator."""
     if (not xy(robot_xy) or not isinstance(corridor, list) or len(corridor) < 2 or
             not all(xy(p) for p in corridor) or valid_returns < 30):
@@ -63,10 +58,9 @@ def raw_route_corridor(points_odom, robot_xy, corridor, valid_returns, yield_cle
     _, _, dx, dy, _ = segments[0]
     if math.hypot(dx, dy) < 1e-8:
         return {"valid": False, "reason": "DEGENERATE_FORWARD_CORRIDOR"}
-    hits = []
+    hits = 0
     corridor_hits = 0
     minimum_clearance = None
-    nearest = None
     for point in points_odom:
         if not xy(point):
             return {"valid": False, "reason": "INVALID_SCAN_POINT"}
@@ -75,13 +69,12 @@ def raw_route_corridor(points_odom, robot_xy, corridor, valid_returns, yield_cle
         if point_in_corridor(point, corridor[0], segments, .52+.30):
             corridor_hits += 1
             clearance = math.dist(point, robot_xy)-.52
-            if minimum_clearance is None or clearance < minimum_clearance:
-                minimum_clearance, nearest = clearance, point
+            minimum_clearance = clearance if minimum_clearance is None else min(minimum_clearance, clearance)
             # 0.6m is measured from the modelled body to an actual scan return,
             # not from the robot centre, and not as the full corridor width.
             if yield_clearance_m is None or clearance <= yield_clearance_m+1e-9:
-                hits.append(point)
-    result = {"valid": True, "blocked": len(hits) >= 3, "blocking_points": len(hits),
+                hits += 1
+    return {"valid": True, "blocked": hits >= 3, "blocking_points": hits,
             "valid_returns": valid_returns, "robot_radius_m": .52,
             "point_corridor_margin_m": .30,
             "yield_clearance_m": yield_clearance_m,
@@ -91,17 +84,6 @@ def raw_route_corridor(points_odom, robot_xy, corridor, valid_returns, yield_cle
             "centre_to_point_stop_radius_m": None if yield_clearance_m is None else .52+yield_clearance_m,
             "scope": "Forward reference corridor; configured clearance from 0.52m circular body to measured LiDAR surface."
                      if yield_clearance_m is not None else "Forward 3 m reference corridor in the controlled crossing room."}
-    if result["blocked"]:
-        if blocking_hits is not None:
-            blocking_hits.extend(hits)
-        last = len(hits)-1
-        limit = min(len(hits), BLOCKING_POINT_SAMPLE_LIMIT)
-        result["blocking_evidence"] = {
-            "frame_id": "odom", "nearest_point_m": nearest, "robot_xy_m": robot_xy,
-            "route_corridor_xy_m": corridor,
-            "points_m": [hits[i*last//(limit-1)] for i in range(limit)],
-        }
-    return result
 
 
 class FusionYieldPolicy:
@@ -114,10 +96,6 @@ class FusionYieldPolicy:
 
     def reset_clearance(self):
         self.clear_since = self.released_at = self.gap_started = self.first_recovery_scan = None
-        self.clearance_confirmed = False
-
-    def confirm_clearance(self):
-        self.clearance_confirmed = True
 
     def _input_gap(self, now, transient):
         # Only an already released route can qualify. A second gap during
@@ -130,7 +108,6 @@ class FusionYieldPolicy:
         elif self.clear_since is not None or self.gap_started is None or now-self.gap_started > .18:
             self.gap_started = self.first_recovery_scan = None
         self.clear_since = self.released_at = None
-        self.clearance_confirmed = False
 
     def _fresh_scan_confirmation(self, now, intent, raw):
         if self.gap_started is None:
@@ -149,7 +126,7 @@ class FusionYieldPolicy:
             return False
         return scan > self.first_recovery_scan
 
-    def evaluate(self, now, intent, raw, observations, *, transient_gap=False, stationary_check=None):
+    def evaluate(self, now, intent, raw, observations, *, transient_gap=False):
         result = {"stamp": now, "action": "WAIT", "action_code": 0, "speed_cap_mps": 0.,
                   "reason": "INPUT_UNAVAILABLE", "route_revision": None,
                   "vision_observations": [], "raw_corridor": raw,
@@ -163,7 +140,7 @@ class FusionYieldPolicy:
             return choose("WAIT", "INVALID_OR_REVERSED_CLOCK")
         self.last_time = now
         if (not isinstance(intent, dict) or intent.get("kind") != "fablab_release_intent_nominal_timing" or
-                not finite(intent.get("stamp")) or not 0 <= now-intent["stamp"] <= RELEASE_INTENT_MAX_AGE_S or
+                not finite(intent.get("stamp")) or not 0 <= now-intent["stamp"] <= .3 or
                 not isinstance(intent.get("route_revision"), int)):
             self._input_gap(now, transient_gap)
             return choose("WAIT", "ROUTE_INTENT_UNAVAILABLE")
@@ -202,16 +179,7 @@ class FusionYieldPolicy:
                 item["assessment"] = risk
                 if risk["valid"]:
                     item.update(velocity_status="VALID_HUAN_VISION", risk=risk["risk"])
-                    forecasts = risk.get("obstacles", [])
-                    same_standing_person = (stationary_check is not None and len(forecasts) == 1 and
-                        track["id"] == stationary_check["track_id"] and
-                        math.dist(match["center_odom_m"], stationary_check["center_odom_m"]) <= .12 and
-                        math.hypot(*forecasts[0]["velocity_mps"]) <= .12 and
-                        forecasts[0]["closest_approach_m"] > stationary_check["required_separation_m"])
-                    if same_standing_person:
-                        item["standing_route_checked"] = True
-                    prediction_conflict = prediction_conflict or (
-                        risk["risk"] == "POTENTIAL_COLLISION" and not same_standing_person)
+                    prediction_conflict = prediction_conflict or risk["risk"] == "POTENTIAL_COLLISION"
             result["vision_observations"].append(item)
         if raw["blocked"] or prediction_conflict:
             self.reset_clearance()
@@ -220,9 +188,8 @@ class FusionYieldPolicy:
             self.clear_since = now
         result["clear_duration_sim_s"] = now-self.clear_since
         recovered = self._fresh_scan_confirmation(now, intent, raw)
-        if now-self.clear_since < .5 and not self.clearance_confirmed and not recovered:
+        if now-self.clear_since < .5 and self.released_at is None and not recovered:
             return choose("WAIT", "CONFIRMING_CLEAR_CORRIDOR")
-        self.confirm_clearance()
         if recovered:
             result["resume_confirmation"] = "TWO_NEW_CLEAR_EXACT_TF_SCANS"
         self.gap_started = self.first_recovery_scan = None

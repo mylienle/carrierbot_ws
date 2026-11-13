@@ -85,30 +85,6 @@ int main()
     check(standingRejoinHasClearance({4.62, -1.68}, standing_person, start, standing_goal, .82, 1.95),
       "standing bypass can use normal guidance speed after a checked return");
 
-    const Point stopped_robot{1.409, -0.222};
-    Obstacle shifted_person;
-    shifted_person.found = true;
-    shifted_person.center = {3.2, -.27};
-    shifted_person.radius = .30;
-    Params replan_params;
-    replan_params.clearance = .12;
-    replan_params.wall_margin = .32;
-    replan_params.rejoin_distance = 2.30;
-    std::vector<Point> wide_walls;
-    for (int i = 0; i <= 70; ++i) {
-      wide_walls.push_back({i * .10, -3.0});
-      wide_walls.push_back({i * .10, 3.0});
-    }
-    const auto shifted = planAvoidance(
-      shifted_person, wide_walls, stopped_robot, start, standing_goal, -1, replan_params);
-    std::vector<std::pair<double, double>> standing_route{
-      {0., 0.}, {1., 0.}, {2.1, -1.08}, {4.0, -1.08}, {5.4, 0.}, {6.0, 1.0}};
-    check(replaceDetour(standing_route, 1, 4, shifted) &&
-      standing_route[1] == std::make_pair(stopped_robot.x, stopped_robot.y) &&
-      standing_route[1 + shifted.size()] == std::make_pair(standing_goal.x, standing_goal.y) &&
-      standing_route.back() == std::make_pair(6.0, 1.0),
-      "standing replan replaces only the remaining detour and preserves the original goal");
-
     EarlyRejoinWindow window;
     check(!window.observe(10.0, true) && !window.observe(10.0, true) &&
       !window.observe(10.125, true) && !window.observe(10.25, true) &&

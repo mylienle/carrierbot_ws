@@ -5,7 +5,7 @@ import math
 from pathlib import Path
 import xml.etree.ElementTree as ET
 
-TOOLSET = "huan-fablab-benchmark-9-standing-close-pass"
+TOOLSET = "huan-fablab-benchmark-7-post-pass-cruise"
 MODE = "fusion_yield_crossing_v2"
 HOLD = 20.0
 SPEED = .25
@@ -20,8 +20,7 @@ PROXY = "paired_person_collision"
 HEAD_ON_SCENARIOS = ("head-on-wide", "head-on-narrow")
 OCCLUDED_SCENARIO = "occluded-crossing"
 STANDING_SCENARIO = "standing-blocker"
-STANDING_CLOSE_PASS_GAP_M = 1.00
-STANDING_CENTER_GAPS_M = (STANDING_CLOSE_PASS_GAP_M, 1.50, 1.60, 1.65)
+STANDING_CENTER_GAPS_M = (1.50, 1.65)
 SCENARIOS = ("crossing",) + HEAD_ON_SCENARIOS + (OCCLUDED_SCENARIO, STANDING_SCENARIO)
 HEAD_ON_START_X = 4.8
 HEAD_ON_TURN_X = 2.8

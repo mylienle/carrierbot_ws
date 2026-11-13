@@ -26,21 +26,6 @@ from fusion_fixture import (NARROW_DETOUR_WALL_MARGIN_M, OCCLUDED_SCENARIO, SCEN
                             STANDING_SCENARIO, TOOLSET, configure_narrow_corridor, configure_occlusion_screen)
 
 
-def guard_input_ready(publishers, guidance_name):
-    """Wait for ROS discovery to identify the sole publisher to the guard."""
-    observed = [(peer.node_namespace, peer.node_name) for peer in publishers]
-    expected = [("/", guidance_name)]
-    if observed == expected:
-        return True
-    if not observed or observed in (
-        [("_NODE_NAMESPACE_UNKNOWN_", "_NODE_NAME_UNKNOWN_")],
-        [("_CREATED_BY_BARE_DDS_APP_", "_CREATED_BY_BARE_DDS_APP_")],
-    ):
-        return False
-    raise RuntimeError("Unexpected source at /safety/input_cmd_vel. Expected %r; found %r"
-                       % (expected, observed))
-
-
 def pose(element):
     item = element.find("pose")
     if item is None:
@@ -57,7 +42,7 @@ def pose(element):
 
 def prepare(world_path, urdf_path, controller_path, ekf_path, amcl_path, output, sim_rate=1.0,
             paired_person=False, sensor_fusion=False, yield_clearance_m=.6, early_rejoin=False,
-            final_approach_ramp=False, scenario="crossing", sim_lidar_rate=None):
+            final_approach_ramp=False, scenario="crossing"):
     tree = ET.parse(str(world_path))
     world = tree.getroot().find("world")
     if world is None:
@@ -149,11 +134,6 @@ def prepare(world_path, urdf_path, controller_path, ekf_path, amcl_path, output,
     if control is None:
         raise ValueError("Missing Gazebo Classic controller configuration")
     control.text = str(controller_path)
-    if sim_lidar_rate is not None:
-        rate = robot.find(".//sensor[@name='laser'][@type='ray']/update_rate")
-        if rate is None:
-            raise ValueError("Missing Gazebo laser update rate in the test URDF")
-        rate.text = str(sim_lidar_rate)
     robot.write(str(output / "robot.urdf"), encoding="utf-8", xml_declaration=True)
     (output / "rsp.yaml").write_text(yaml.safe_dump({
         "robot_state_publisher": {"ros__parameters": {
@@ -184,8 +164,6 @@ def main():
                         help="Use the separate build with blocked-detour recovery")
     parser.add_argument("--sim-rate", type=float, choices=(0.35, 1.0), default=1.0,
                         help="Target simulation/wall-time ratio, 0.35 for CPU perception experiments")
-    parser.add_argument("--sim-lidar-rate", type=float, choices=(10., 20.),
-                        help="LaserScan rate in simulated Hz in this Gazebo session")
     parser.add_argument("--paired-person", action="store_true",
                         help="Use one animated person with a synchronized LiDAR collision proxy")
     parser.add_argument("--route-preview", action="store_true",
@@ -330,7 +308,7 @@ def main():
             sensor_fusion=args.sensor_fusion,
             yield_clearance_m=None if args.legacy_yield_zone else args.yield_clearance,
             early_rejoin=args.early_rejoin, final_approach_ramp=args.final_approach_ramp,
-            scenario=args.scenario, sim_lidar_rate=args.sim_lidar_rate)
+            scenario=args.scenario)
     (output / "session.json").write_text(json.dumps({
         "configured_speed_mps": args.speed,
         "scenario": args.scenario if args.sensor_fusion else None,
@@ -351,7 +329,6 @@ def main():
         "standing_post_pass_cruise": args.standing_post_pass_cruise,
         "detour_wall_margin_m": detour_wall_margin,
         "target_sim_rate": args.sim_rate,
-        "sim_lidar_rate_hz": args.sim_lidar_rate,
         "paired_person": args.paired_person,
         "odometry": "wheel_only",
         "gazebo_master_uri": simulation_env["GAZEBO_MASTER_URI"],
@@ -538,8 +515,7 @@ def main():
                (["-p", "standing_post_pass_cruise:=true"] if args.standing_post_pass_cruise else []) +
                (["-p", "avoid_wall_margin:=" + str(detour_wall_margin)]
                 if detour_wall_margin is not None else []))
-        if not args.behavior_gate:
-            wait_for("Guidance command publisher", lambda: node.count_publishers(guidance_command_topic) == 1)
+        wait_for("Guidance command publisher", lambda: node.count_publishers(guidance_command_topic) == 1)
         if args.route_preview:
             wait_for("Internal Fablab route telemetry", lambda: bool(route_status)
                      and time.monotonic()-route_status["wall"] <= 0.6
@@ -547,9 +523,9 @@ def main():
         if args.behavior_gate:
             if route_status["data"].get("behavior_gate", {}).get("enabled") is not True:
                 raise RuntimeError("The running guidance node does not have the behavior gate enabled")
-            wait_for("Sole Fablab publisher at " + guidance_command_topic,
-                     lambda: guard_input_ready(node.get_publishers_info_by_topic(guidance_command_topic),
-                                               guidance_name), seconds=15)
+            peers = node.get_publishers_info_by_topic("/safety/input_cmd_vel")
+            if len(peers) != 1 or peers[0].node_name != guidance_name:
+                raise RuntimeError("Unexpected source at guard input")
         elif node.count_subscribers("/avoidance_preview/cmd_vel") != 0:
             raise RuntimeError("Unexpected subscriber to the preview velocity topic")
         if not wheel_route_ok():
@@ -591,8 +567,6 @@ def main():
         elif args.route_preview:
             print("TUYEN NOI BO FABLAB: BAT. Chi xuat du lieu; chua noi lenh ra banh xe.", flush=True)
         print("NHIP MO PHONG MUC TIEU: %.2f" % args.sim_rate, flush=True)
-        if args.sim_lidar_rate is not None:
-            print("TAN SO LIDAR MO PHONG: %.1f Hz" % args.sim_lidar_rate, flush=True)
         if args.paired_person:
             print("PERSON PAIRED: camera thay nguoi; LiDAR thay proxy di cung nguoi. Xe dang cho.", flush=True)
         print("AMCL x=%.3f y=%.3f. Xe vua spawn tai (0, 0)." % (position.x, position.y), flush=True)

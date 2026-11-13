@@ -1,7 +1,6 @@
 """Measured data boundary for Huan fusion. No ROS actions, commands, or truth."""
 import hashlib
 import json
-import math
 from pathlib import Path
 
 from huan_fusion_vendor.base_handoff import clusters
@@ -9,10 +8,6 @@ from huan_fusion_vendor.dynamic_obstacles import assess
 from huan_fusion_vendor.handoff import Handoff
 from huan_fusion_vendor.publication_guard import current_packet
 from huan_fusion_vendor.vision_contract import number, vector
-
-
-STANDING_LASER_RESERVE_M = .50
-UNCERTAINTY_RATE_MPS = .15
 
 
 def verify_vendor():
@@ -42,42 +37,7 @@ def fusion_risk(packet, intent, now):
     # These are the existing user's footprint/envelope, not the smaller .42m
     # default in the Jetson export. A model may add a restriction, not clear LiDAR.
     return assess(packet, intent, now, horizon=2., robot_radius=.52,
-                  person_radius=.30, margin=.20, uncertainty_rate=UNCERTAINTY_RATE_MPS)
-
-
-def stationary_laser_ids(packet):
-    """Identify continuous laser tracks with measured low speed, after risk validation."""
-    stationary = set()
-    for track in packet["tracks"]:
-        if track.get("source") != "laser_scan_tf":
-            continue
-        # The vendor rounds low speeds to zero for prediction. Use the measured speed.
-        velocity = track["lidar_support"].get("measured_velocity")
-        if vector(velocity, 2) and math.hypot(*velocity) <= .12:
-            stationary.add(track["id"])
-    return stationary
-
-
-def apply_standing_laser_reserve(risk, packet):
-    """Adjust only the reserve of a valid, continuously measured near-stationary laser track."""
-    if not risk["valid"] or not isinstance(packet, dict):
-        return
-    stationary = stationary_laser_ids(packet)
-    for obstacle in risk["obstacles"]:
-        if obstacle["id"] not in stationary or obstacle.get("lidar_confirmed") is not True:
-            continue
-        previous = obstacle["required_separation_m"]
-        reserve = STANDING_LASER_RESERVE_M + UNCERTAINTY_RATE_MPS * obstacle["age_s"]
-        separation = previous - obstacle["uncertainty_radius_m"] + reserve
-        gap = obstacle["closest_approach_m"] - separation
-        risk.setdefault("baseline_risk", risk["risk"])
-        obstacle.update(baseline_required_separation_m=previous, uncertainty_radius_m=reserve,
-                        required_separation_m=separation, clearance_bound_m=gap,
-                        risk="POTENTIAL_COLLISION" if gap <= 0. else "CLEAR_WITHIN_MODEL")
-    if "baseline_risk" in risk:
-        risk["risk"] = ("POTENTIAL_COLLISION" if any(
-            obstacle["risk"] == "POTENTIAL_COLLISION" for obstacle in risk["obstacles"])
-            else "CLEAR_WITHIN_MODEL")
+                  person_radius=.30, margin=.20, uncertainty_rate=.15)
 
 
 class HuanFusionBridge:

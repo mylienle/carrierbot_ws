@@ -10,7 +10,7 @@ import xml.etree.ElementTree as ET
 from fablab_route import route_candidate
 from fusion_fixture import (CrossingTiming, configure, configure_narrow_corridor, configure_occlusion_screen, crossing_y,
                             factory_arguments, insertion_report)
-from fusion_yield_policy import RELEASE_PLAN_LOOKAHEAD_S, FusionYieldPolicy, raw_route_corridor, release_intent
+from fusion_yield_policy import FusionYieldPolicy, raw_route_corridor, release_intent
 from fusion_yield_trial import TrialScore
 from huan_trial_scoring import encounter_score, observe_occlusion, observe_standing_blocker
 from test_fablab_route import fixture
@@ -42,20 +42,6 @@ def evaluate(policy, t=10., observations=None, blocked=False, revision=1):
 class PolicyTests(unittest.TestCase):
     def test_raw_corridor_blocks_even_without_vision(self):
         self.assertEqual(evaluate(FusionYieldPolicy(), blocked=True)["reason"], "LIDAR_CORRIDOR_BLOCKED")
-
-    def test_blocking_scan_records_nearest_point_and_bounded_spatial_sample(self):
-        points = [[1.10, y/200.] for y in range(-30, 31)] + [[.85, .05], [1.9, 0.]]
-        result = raw_route_corridor(points, [0., 0.], [[0., 0.], [3., 0.]], len(points), .60)
-        self.assertTrue(result["blocked"])
-        self.assertGreater(result["blocking_points"], 24)
-        evidence = result["blocking_evidence"]
-        self.assertEqual(evidence["nearest_point_m"], [.85, .05])
-        self.assertEqual(evidence["frame_id"], "odom")
-        self.assertEqual(len(evidence["points_m"]), 24)
-        self.assertNotIn([1.9, 0.], evidence["points_m"])
-        clear = raw_route_corridor(points[-2:], [0., 0.], [[0., 0.], [3., 0.]], len(points), .60)
-        self.assertFalse(clear["blocked"])
-        self.assertNotIn("blocking_evidence", clear)
 
     def test_release_requires_continuous_clear_observations(self):
         policy = FusionYieldPolicy()
@@ -194,10 +180,8 @@ class PolicyTests(unittest.TestCase):
                         linear_speed_mps=.12, linear_speed_max_mps=.12)
         intent = release_intent(route_candidate(snapshot, robot, 10., transform))
         self.assertEqual(intent["speed_assumption_mps"], .06)
-        self.assertEqual(intent["positions"][-1]["dt_s"], RELEASE_PLAN_LOOKAHEAD_S)
         points = [point["xy_m"] for point in intent["positions"]]
-        self.assertAlmostEqual(sum(math.dist(a, b) for a, b in zip(points, points[1:])),
-                               .06*RELEASE_PLAN_LOOKAHEAD_S)
+        self.assertAlmostEqual(sum(math.dist(a, b) for a, b in zip(points, points[1:])), .12)
         snapshot["standing_detour_speed_limited"] = False
         rejoin = release_intent(route_candidate(snapshot, robot, 10., transform))
         self.assertEqual(rejoin["speed_assumption_mps"], .12)
@@ -205,8 +189,7 @@ class PolicyTests(unittest.TestCase):
         post_pass = release_intent(route_candidate(snapshot, robot, 10., transform))
         self.assertEqual(post_pass["speed_assumption_mps"], .08)
         points = [point["xy_m"] for point in post_pass["positions"]]
-        self.assertAlmostEqual(sum(math.dist(a, b) for a, b in zip(points, points[1:])),
-                               .08*RELEASE_PLAN_LOOKAHEAD_S)
+        self.assertAlmostEqual(sum(math.dist(a, b) for a, b in zip(points, points[1:])), .16)
         snapshot["standing_detour_speed_cap_mps"] = .12
         with self.assertRaisesRegex(ValueError, "INVALID_STANDING_DETOUR_SPEED_CAP"):
             release_intent(route_candidate(snapshot, robot, 10., transform))
@@ -476,12 +459,12 @@ class ScoreTests(unittest.TestCase):
                  "command_preview": {"linear_x": 0., "angular_z": 0.}}
         detour = dict(route, route_revision=2, current_segment=1, standing_detour_active=True,
                       waypoints_map=[[0., 0.], [2., -2.], [5.4, 0.]])
-        for request_key in ("standing_detour_request", "close_pass_replan_request", None):
+        for requested in (True, False):
             score = TrialScore()
             for stamp in (10., 10.5):
                 score.observe(stamp, decision, route, [0., 0.], [0., 0.], [3.2, 0.])
-            if request_key is not None:
-                score.observe(10.6, dict(decision, **{request_key: {"center_map": [3.2, 0.]}}),
+            if requested:
+                score.observe(10.6, dict(decision, standing_detour_request={"center_map": [3.2, 0.]}),
                               route, [0., 0.], [0., 0.], [3.2, 0.])
                 score.observe(10.7, decision, detour, [0., 0.], [0., 0.], [3.2, 0.])
                 with self.assertRaisesRegex(RuntimeError, "drifted"):

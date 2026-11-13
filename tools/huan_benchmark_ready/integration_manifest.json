@@ -1,9 +1,9 @@
 {
-  "toolset": "huan-fablab-benchmark-9-standing-close-pass",
+  "toolset": "huan-fablab-benchmark-7-post-pass-cruise",
   "runtime_sha256": {
-    "analyze_huan_run.py": "c37c150d73b3a1272977dec939841c3123a088e210461d7620bc1cf79ec4a2ed",
+    "analyze_huan_run.py": "da5f57da6c09bf3f056375d901968ba3399068a03c31b81b93582efb9b74aa6a",
     "behavior_gate_source/behavior_gate.hpp": "fd16c3ad11d50ee2b65b963945163aafbfef2e850e1039ed81f8b0a75ec63cb7",
-    "behavior_gate_source/fablab_guidance_node.cpp": "9a7804c661a226f7d31ad6deeb2f00f062508ae28ab3fce8615ea09c5a45a4fb",
+    "behavior_gate_source/fablab_guidance_node.cpp": "ce8bbac2bb965c61f218cbed132432a67b71943223588cf4404031342a465064",
     "behavior_gate_source/route_preview.hpp": "50598d5ef72817c47a6eed7a8b49b0882a0600ed1999964affe24166ee8431e9",
     "behavior_gate_trial.py": "5da92e4104a73fda16784634d75a83dbfef069c8d071d49704f6e403ce1defa3",
     "build_behavior_gate.sh": "e976524ef977ddddc0b30b957c9965334f1b418beacfd224893c1ce0379c02b3",
@@ -24,16 +24,16 @@
     "dynamic_decision_policy.py": "cac66837cbe9c39a3d914f735b5cf812f65388e2b3ca81226bfc21953ea17f0e",
     "ensure_huan_gate.py": "d37862d6843fc9bc06bd1a21177cb444b18ab1ff33069478bb4ca0c6b50096c0",
     "fablab_route.py": "394ef5e11f5e0b57d6c9dcc207b762dcfc9d080d3066b9fff04a9215d9423310",
-    "fusion_fixture.py": "621848eff2d7d524b7e9523685a3dd8bf56136420ef47949fb9783c6345693a7",
-    "fusion_sensor_adapter.py": "30b1a72de32c1b7eaa874d82d8a0037f387ae31c0aebe5b5f6bcd48acb3697c3",
-    "fusion_yield_policy.py": "366ce239b72e22f691aab1b451b8cf5d24e347f0f12f8b6d2f34ae20a8de2e6e",
-    "fusion_yield_trial.py": "5b74954abba90fb0b89cd5712566fa9a0f16a2ea7722e819175dd006f1b57cfc",
+    "fusion_fixture.py": "b5430378e25a7c5f270468eb70725ba24e2727e7db01522e3096314810fb68e3",
+    "fusion_sensor_adapter.py": "5b0d3ec3e058469f3bb244b82fe444d591288d7d25f5dc027042683b160221e7",
+    "fusion_yield_policy.py": "0c0c4d8dbef0f0cf2810d168ca0e6a10e4eeba507c3abb16539051dc502be49b",
+    "fusion_yield_trial.py": "9587e2ca1fd300407c0ecafbfa8fe45933fbd79d97513810ca5600dbb136343c",
     "gazebo_session.py": "b25282b75a1f55ee63689f75242b411ffb7e6cd905a2adf67dd5b25672f7121b",
     "huan_cpu_metadata.py": "a334346349683928cc920c9759e6a1f8baa78824e246d5f2e76f903259d18dbc",
     "huan_cpu_velocity.py": "118826ca88c2edd1edad2d2c03862766e4b15d586a4fc02badc3411acd688dcb",
     "huan_dynamic_obstacles.py": "d3867ecae1f2ad3f415e74d26bb86171265c8204410d00be00c519791acff6da",
-    "huan_fusion_bridge.py": "82a154c720db24ccae2754c91dc91e72f58f8da30972f94f85580fb5e3a2ae94",
-    "huan_fusion_policy.py": "1e1cbeedc1780a6ed7dfb798ef6ab1d483440134eb9d0673eed6408bd2d1300d",
+    "huan_fusion_bridge.py": "1566300e5c241e7ee8614787bb149536bab52a97e04deec2bda4fb312931f535",
+    "huan_fusion_policy.py": "cdcaee836b3e0906ad2d8392720969bd9c2fa5ed20f865bc962ac816fa77869d",
     "huan_fusion_vendor/__init__.py": "9015c77e3e414d671e2bcc47ae1a16457516b7ad1a82b485a24e31449a07e0f4",
     "huan_fusion_vendor/base_handoff.py": "6af563545b657a2cfd8ba8fdab9f5bf2194e033b3f614a999ef43aae5e04dc9e",
     "huan_fusion_vendor/bearing_support.py": "2050f2f4449c8e63c7b07783742f8d2e2e25dad87c865335f35dfd844f3d6b6f",
@@ -72,21 +72,16 @@
     "start_behavior_gate.sh": "3219b35958b5d8e20fdf855df9baa4c2d56712efbd59cf4a6d13e97331545ca4",
     "start_fusion_yield.sh": "aa2050bbeb7e94b2c80dfa474c7f2951fc41f4ec4d2400d48de45929a5d8e342",
     "start_huan_fusion.sh": "ce2473c70f11d3d7183310112cc6416f6c13008b698e2420f7f986aba9760fb5",
-    "start_lien_test.py": "288054c64d482e5a9713ddb5c454d34d36783bf87316f1ff34f812d41cd25376",
+    "start_lien_test.py": "44ef65cb521d700956389ab6aebf7043ab62b56d7b492d7dc88a87f2418aa42b",
     "start_lien_test.sh": "5e72d4805767150ab24265be0d6b5f263d28e9e87bbc2b85a4cd93af27f5298c",
     "start_route_shadow.sh": "40530fa39bd71349a9bce211d61807bf78688c569a88f1e6faee1b37873c3709"
   },
   "runtime_variant": "synchronized-reliable-crossing-and-head-on",
   "base_release_sha256": "d0808ac8d37add41abd1a38268a73c6778fe041c65d40f86a14e6158c3ce759b",
   "offline_validation": {
-    "python_tests_passed": 209,
+    "python_tests_passed": 170,
     "python38_syntax": true,
-    "behavior_gate_checks_passed": 28,
-    "standing_close_pass_geometry": {
-      "planned_center_distance_m": 1.0,
-      "narrow_corridor_rejected": true
-    },
-    "standing_replan_geometry": true
+    "behavior_gate_checks_passed": 26
   },
   "experimental_resume_profiles": [
     "fresh-scans"

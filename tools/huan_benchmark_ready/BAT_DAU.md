@@ -1,6 +1,29 @@
-# Thử đối chứng người cắt ngang
+# Obstacle Avoidance Hoàn–Huân
 
-Bộ thử `huan-fablab-benchmark-9-standing-close-pass` dùng V8 Reliable làm nền và giữ tối ưu xử lý dữ liệu LiDAR. Xe tiếp tục chờ khi dự đoán của Huân báo xung đột. Sau khi hết xung đột, bộ điều phối bắt đầu xác nhận lối trống lại từ đầu.
+## Chạy lại ca 1,65 m đã đạt
+
+Chép thư mục `tools/huan_benchmark_ready` của nhánh này vào thư mục chia sẻ VMware. Trong Ubuntu, dùng hai lệnh dưới đây. Terminal 1 phải hiện `SAN SANG THU LIDAR + STEREO` trước khi chạy Terminal 2.
+
+```bash
+bash /mnt/carrierbot-share/huan_benchmark_ready/start_huan_fusion.sh \
+  --scenario standing-blocker --yield-clearance 0.6 \
+  --early-rejoin --final-approach-ramp --clear-cruise \
+  --yield-before-detour --standing-center-gap 1.65 \
+  --standing-post-pass-cruise --sim-rate 1.0
+```
+
+```bash
+bash /home/tranduyhoan/carrierbot-huan-benchmark/run_huan_fusion_trial.sh \
+  --scenario standing-blocker --mode huan --velocity-profile cpu-sparse \
+  --vision-threads 1 --reliable-rgbd --nearby-slow \
+  --resume-profile standard --standing-detour
+```
+
+Trong lượt tham chiếu, xe vượt qua người vẫn đứng giữa lối và tới đích với `passed: true`. Khoảng cách tâm–tâm nhỏ nhất là **1,63 m**, khoảng hở theo mô hình hai hình tròn là **0,86 m**, sai số đích **0,15 m**. Thời gian chạy là **189,8 giây mô phỏng**. Tốc độ lệnh trên đoạn nhập tuyến sau khi vượt người đạt **0,08 m/s**. Tất cả số liệu lấy từ `summary.json` của ca Gazebo `standing-blocker`.
+
+## Thử đối chứng người cắt ngang
+
+Bộ thử `huan-fablab-benchmark-7-post-pass-cruise` dùng V8 Reliable làm nền và giữ tối ưu xử lý dữ liệu LiDAR. Xe tiếp tục chờ khi dự đoán của Huân báo xung đột. Sau khi hết xung đột, bộ điều phối bắt đầu xác nhận lối trống lại từ đầu.
 
 Đóng terminal khởi động Gazebo cũ. Trong Terminal 1 của Ubuntu, mở phiên mới.
 
@@ -85,42 +108,3 @@ Xe giữ giới hạn 0,06 m/s khi đang vòng qua người. Trên đoạn nhậ
 Khi Fablab đang dừng chờ trên đoạn vòng có giới hạn 0,06 m/s, bộ điều phối gửi cùng mức 0,06 m/s nếu đã đủ điều kiện cho chạy. Đọc `standing_blocker.zero_command_release_confirmation_sim_s` trong `performance_review.json` để đo thời gian xe còn giữ lệnh bằng 0 ở bước xác nhận chạy lại. Lặp cùng mốc 1,65 m để so với lượt trước.
 
 Thêm `--standing-post-pass-cruise` ở Terminal 1 để thử 0,08 m/s trên đoạn nhập lại tuyến với mốc 1,65 m. Xe phải vượt người, đủ khoảng hở trên đoạn còn lại, có LiDAR và vị trí mới, và nhận lệnh cho đi với tốc độ tương ứng. Đọc `post_pass_cruise_max_guard_command_mps` trong `summary.json` và `standing_blocker.bypass_to_arrival_sim_s` trong `performance_review.json`. Giữ `--sim-rate 1.0` để so với lượt 1,65 m đã đạt ở cùng cấu hình đồng hồ.
-
-Thử đường vòng sát hơn với `--standing-center-gap 1.60 --sim-rate 1.0` ở Terminal 1 và `--standing-detour` ở Terminal 2. Dùng lượt 1,65 m chạy theo giới hạn 0,06 m/s trên đoạn né làm đối chứng. Mục `standing_blocker.outline_clearance` trong `performance_review.json` ước lượng khoảng hở từ mô hình bánh xe và thân xe URDF đến mô hình người, có xét góc xe lúc quay. Dữ liệu gồm vị trí Gazebo và hướng xe từ TF. Mốc 0,30 m dùng để đối chiếu kết quả hình học. `minimum_interpolated_outline_lower_bound_m` là ước lượng với giả thiết nội suy giữa hai mẫu liên tiếp có góc hợp lệ.
-
-### Đường vòng 1,00 m trong phòng rộng
-
-Mở phiên mới bằng hai lệnh sau. Giữ Terminal 1 mở và đợi hiện `SAN SANG` trước khi chạy Terminal 2.
-
-```bash
-bash /mnt/carrierbot-share/huan_benchmark_ready/start_huan_fusion.sh \
-  --scenario standing-blocker --yield-clearance 0.6 \
-  --early-rejoin --final-approach-ramp --clear-cruise \
-  --yield-before-detour --standing-center-gap 1.00 \
-  --sim-rate 0.35 --sim-lidar-rate 20
-```
-
-```bash
-bash ~/carrierbot-huan-benchmark/run_huan_fusion_trial.sh \
-  --scenario standing-blocker --mode huan --velocity-profile cpu-sparse \
-  --vision-threads 1 --reliable-rgbd --nearby-slow \
-  --resume-profile standard --standing-detour --reduced-standing-laser-reserve
-```
-
-Mốc 1,00 m là khoảng cách giữa hai tâm khi lập đường. Ca đạt khi xe vượt người đang đứng và tới đích, đồng thời khoảng hở nhỏ nhất tại các mẫu hợp lệ từ mép xe đến mô hình người đạt ít nhất 0,30 m. Đọc `standing_close_pass` trong `summary.json` và `standing_blocker.outline_clearance` trong `performance_review.json`.
-
-Trên đường vòng 1,00 m, xe yêu cầu dừng khi thiếu dữ liệu LiDAR mới gắn với cùng người hoặc khi một scan báo dấu hiệu chuyển động. Ba scan mới liên tiếp xác nhận chuyển động. Khi vị trí đo thay đổi hoặc đường vòng thiếu khoảng hở, xe kiểm tra lại sau ít nhất 0,40 giây mô phỏng có scan mới của cùng người ở vị trí ổn định. Đường còn đủ khoảng hở có thể được xác nhận lại. Nếu thiếu khoảng hở, Fablab dùng scan mới để kiểm tra vị trí người và lập lại đoạn vòng trong lúc xe chờ. `standing_close_pass` ghi số lần xác nhận lại, yêu cầu lập lại và số lần tuyến thực sự đổi. Kịch bản Gazebo dùng người đứng sau khi bước vào lối. Việc người bước tiếp khi xe đi ngang cần một lượt thử riêng.
-
-Sau khi mất dấu ngắn trên đoạn vòng đã được phép chạy ở mức 0,06 m/s, xe vẫn gửi `WAIT` trong lúc thiếu dữ liệu. Nếu lấy lại được hai scan mới có TF đúng thời điểm, cùng người và cùng phiên bản đường vòng, xe có thể gửi lại lệnh chạy chậm khi cả hai lần kiểm tra đều đạt khoảng hở và dự báo thông. Scan đầu tiên phải xuất hiện trong 0,18 giây mô phỏng kể từ lúc mất dấu. Đọc `standing_close_pass.resumes_after_short_track_gap` để biết số lệnh chạy chậm gửi theo cách này. Mục `lidar_block_samples` trong `performance_review.json` ghi scan chặn đầu và cuối, điểm gần nhất, tối đa 24 điểm chặn và dải kiểm tra trong hệ tọa độ `odom`.
-
-Khi Fablab đang bám đường vòng 1,00 m ở mức 0,06 m/s, bộ điều phối có thể kiểm tra người đứng yên theo cùng khoảng cách hình học mà Fablab dùng để lập vòng. Phép kiểm tra dùng bao hình chiếu xe 0,36 m, bán kính người ít nhất 0,30 m, khoảng hở mép 0,30 m và dự phòng 0,04 m, cộng phần bù chuyển động theo tuổi scan. Nó xét đoạn còn lại và các góc mà bộ bám đường có thể cắt. Mỗi lượt xét cần người đã đứng ổn định ít nhất 0,40 giây, cùng dấu theo dõi, scan và TF đúng thời điểm, cùng đoạn đường và odometry mới. Khi LiDAR báo chắn, tất cả tia chặn phải thuộc đúng cụm đã xác nhận và có cùng dấu thời gian scan. Mọi lệnh chạy được giới hạn ở 0,06 m/s và đi qua `safety_guard`.
-
-Chuỗi xác nhận người đứng ổn định dùng cụm LiDAR đã ghép với cùng ID khi Huân báo nguồn camera hoặc LiDAR. Khi thiếu dữ liệu ngắn, xe gửi `WAIT`. Chuỗi scan có thể được giữ trong tối đa 0,15 giây mô phỏng trên cùng phiên bản tuyến, rồi chỉ dùng lại sau khi nhận scan mới xác nhận cụm. Khi đã đủ bằng chứng đứng yên 0,40 giây, hai scan mới liên tiếp phải cùng đạt phép kiểm tra hình học và các điều kiện dừng trước khi phát lệnh `SLOW`. Xem `standing_history_preserved_samples` và `standing_route_resumes_on_two_scans` trong `standing_close_pass`.
-
-Trong `summary.json`, xem `standing_close_pass.checked_standing_route_samples`, `matched_cluster_cleared_raw_stop_samples` và `stationary_geometry_cleared_fusion_conflict_samples`. Tùy chọn `--reduced-standing-laser-reserve` đặt mức dự phòng 0,50 m cộng phần bù tuổi scan cho các dự báo LiDAR ngoài phép kiểm tra hình học này. Với bán kính mô hình xe 0,52 m và người 0,30 m, mức đó tương đương ít nhất 1,32 m giữa hai tâm.
-
-Terminal 2 kiểm tra vận tốc bánh xe ngay trước khi khởi động Vision và báo `DA NHAN VAN TOC BANH XE TU /odom.` khi nhận mẫu hợp lệ đầu tiên. Nếu thiếu dữ liệu sau 6 giây, lượt thử dừng ở `wheel_odometry_preflight` trước khi gửi đích. `standing_close_pass.fresh_wheel_odometry_samples` ghi số lần có vận tốc bánh xe mới trong giai đoạn vòng. Nếu phép kiểm tra khoảng hở ít được áp dụng, xem `standing_close_pass.standing_route_check_status_counts` để phân biệt thiếu odometry, thiếu cụm cùng scan và đường vòng chưa đủ khoảng hở.
-
-Để thử dự báo lại ở tốc độ thấp, thêm `--crawl-on-predicted-conflict` ở Terminal 2. Khi xe đang vòng, LiDAR có dữ liệu mới về vật cản gần đứng yên và odometry xác nhận xe đã chậm, bộ Huân có thể kiểm tra lại cùng đoạn đường với tốc độ dự báo 0,07 m/s. Nếu dự báo đạt khoảng cách yêu cầu và quá trình xác nhận lối trống hoàn tất, lệnh chạy bị giới hạn ở 0,06 m/s. Xem `crawl_forecast` trong `summary.json` để biết số mẫu kiểm tra và số mẫu thực sự phát lệnh chạy chậm.
-
-Khi thử nhịp chậm `--sim-rate 0.35`, có thể thêm `--sim-lidar-rate 20` ở Terminal 1. Tùy chọn này đặt tần số LiDAR trong bản URDF của phiên Gazebo để giảm khoảng cách giữa các scan có thể ghép với TF đúng thời điểm. `sim_lidar_rate_hz` ghi cấu hình trong báo cáo. Đối chiếu thời gian `CLOSE_PASS_TRACK_UNAVAILABLE`, trạng thái bám đường và lỗi trôi trong lúc chờ với lượt 10 Hz.

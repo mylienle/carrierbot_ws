@@ -7,7 +7,7 @@ import threading
 
 from fablab_route import FablabRouteReader
 from fusion_yield_policy import raw_route_corridor, release_intent
-from sensor_pair_geometry import associate, fit_circle, scan_clusters, transform_xy
+from sensor_pair_geometry import associate, scan_clusters, transform_xy
 
 
 def stamp(message):
@@ -48,24 +48,6 @@ def project_scan(scan, position, rotation, robot_at_scan):
     return points, returns
 
 
-def match_blocking_arc(scan, position, rotation, hits, center, radius, point_count):
-    groups = scan_clusters(scan.ranges, scan.angle_min, scan.angle_increment,
-                           scan.range_min, min(scan.range_max, 10.), gap=.16)
-    matches = []
-    for group in groups:
-        if len(group) != point_count:
-            continue
-        fit = fit_circle(group)
-        if (fit is not None and fit["fit_rms_m"] <= .025 and abs(fit["radius_m"]-radius) <= .025 and
-                math.dist(transform_xy(fit["center"], position, rotation), center) <= .025):
-            matches.append(group)
-    if len(matches) != 1:
-        return None
-    arc = {tuple(transform_xy(point, position, rotation)) for point in matches[0]}
-    matched = [point for point in hits if tuple(point) in arc and math.dist(point, center) <= radius+.04]
-    return matched if len(matched) == len(hits) else None
-
-
 class SensorTimeWindow:
     """No goal before 0.5 sim s of valid input with at least three scans."""
     def __init__(self):
@@ -101,7 +83,6 @@ class FusionSensors:
             self.huan = None
         self.scans = deque(maxlen=120)
         self.projected_scan = None
-        self.blocking_returns = None
         self.scan_wall = 0.
         self.packet, self.packet_wall, self.packets = None, 0., 0
         self.matches, self.positions, self.velocities = set(), set(), set()
@@ -177,14 +158,10 @@ class FusionSensors:
         if cached is None or cached[0] is not scan or cached[1] != geometry:
             cached = self.projected_scan = (scan, geometry, project_scan(scan, p, q, r))
         points, returns = cached[2]
-        blocking_hits = []
         result = raw_route_corridor(points, [robot["x"], robot["y"]], intent["route_corridor_xy_m"], returns,
-                                    yield_clearance_m=self.yield_clearance_m, blocking_hits=blocking_hits)
-        self.blocking_returns = (t, blocking_hits)
+                                    yield_clearance_m=self.yield_clearance_m)
         result.update(stamp=t, received_age_wall_s=time.monotonic()-received_wall,
                       skipped_newer_scans=skipped, exact_sensor_time_tf=True)
-        if result.get("blocked") and "map_to_odom" in intent:
-            result["blocking_evidence"]["map_to_odom"] = intent["map_to_odom"]
         if self.huan is not None and t != self.huan_scan_stamp:
             from huan_fusion_bridge import measured_scan
             if abs(q[0]) > .001 or abs(q[1]) > .001:
@@ -194,14 +171,6 @@ class FusionSensors:
                                            scan.range_min, scan.range_max, [p[0], p[1], yaw], t, received_wall)
             self.huan_scan_stamp = t
         return result
-
-    def matched_blocking_returns(self, scan_stamp, center, radius, point_count):
-        """Return exact projected hits only when a single measured arc matches."""
-        if (self.blocking_returns is None or self.projected_scan is None or
-                self.blocking_returns[0] != scan_stamp):
-            return None
-        scan, (position, rotation, _), _ = self.projected_scan
-        return match_blocking_arc(scan, position, rotation, self.blocking_returns[1], center, radius, point_count)
 
     def fused(self, intent, robot):
         if self.huan is None:

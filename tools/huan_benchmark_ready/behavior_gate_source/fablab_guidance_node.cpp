@@ -167,11 +167,10 @@ public:
       throw std::invalid_argument("Compact standing detour requires yield before detour");
     }
     if (standing_center_gap_ != 0.0 &&
-      ((standing_center_gap_ != 1.00 && standing_center_gap_ != 1.50 &&
-      standing_center_gap_ != 1.60 && standing_center_gap_ != 1.65) ||
+      ((standing_center_gap_ != 1.50 && standing_center_gap_ != 1.65) ||
       compact_standing_detour_ || !yield_before_detour_))
     {
-      throw std::invalid_argument("Invalid standing centre gap or missing yield-before-detour profile");
+      throw std::invalid_argument("The 1.50 and 1.65 m standing centre gaps require yield before detour and their own profile");
     }
     if (standing_post_pass_cruise_ && standing_center_gap_ != 1.65) {
       throw std::invalid_argument("Post-pass cruise requires the 1.65 m standing centre gap");
@@ -582,10 +581,7 @@ private:
   {
     avoid_stop_ = false;
     obstacle_ = fablab_avoidance::Obstacle();
-    const bool replace_standing = stationary_blocker && stationary_detour_ &&
-      standing_center_gap_ == 1.00 && current_segment_ < avoid_end_segment_ &&
-      avoid_end_segment_ < waypoints_.size();
-    if (!avoidance_enabled_ || finished_ || (start_alignment_pending_ && !replace_standing) ||
+    if (!avoidance_enabled_ || finished_ || start_alignment_pending_ ||
       current_segment_ + 1 >= waypoints_.size())
     {
       avoid_confirm_count_ = 0;
@@ -593,21 +589,17 @@ private:
       return;
     }
     const fablab_avoidance::Point robot{x_, y_};
-    const fablab_avoidance::Point current_start{
+    const fablab_avoidance::Point start{
       waypoints_[current_segment_].first, waypoints_[current_segment_].second};
-    const auto start = replace_standing ? avoid_original_start_ : current_start;
-    const auto goal_index = replace_standing ? avoid_end_segment_ : current_segment_ + 1;
     const fablab_avoidance::Point goal{
-      waypoints_[goal_index].first, waypoints_[goal_index].second};
+      waypoints_[current_segment_ + 1].first, waypoints_[current_segment_ + 1].second};
     // Only points ahead of the robot heading count: right after a turn onto a diagonal leg the
     // segment band also covers points beside or behind the robot, which then latch the stop forever
     std::vector<bool> is_ahead = scan_point_is_new_;
     const double heading_x = std::cos(theta_);
     const double heading_y = std::sin(theta_);
     for (std::size_t i = 0; i < scan_points_.size(); ++i) {
-      if (!replace_standing &&
-        (scan_points_[i].x - x_) * heading_x + (scan_points_[i].y - y_) * heading_y <= 0.0)
-      {
+      if ((scan_points_[i].x - x_) * heading_x + (scan_points_[i].y - y_) * heading_y <= 0.0) {
         is_ahead[i] = false;
       }
     }
@@ -622,25 +614,14 @@ private:
       if (!safety_stop_ && map_ && map_->info.resolution > 0.0 &&
         recovery_scan_available_ && scan_age >= -0.02 && scan_age <= 0.3 && receipt_age <= 0.6 &&
         scan_points_.size() >= 30 && obstacle_.found &&
-        (replace_standing || current_segment_ + 1 >= avoid_end_segment_) &&
+        current_segment_ + 1 >= avoid_end_segment_ &&
         obstacle_.surface_distance < avoid_params_.avoid_distance &&
         fablab_avoidance::distance(obstacle_.center, *stationary_blocker) <= 0.35 &&
         fablab_avoidance::distance(robot, goal) <= sense_distance_ &&
         recovery_scan_stamp_ != stationary_plan_scan_stamp_)
       {
         stationary_plan_scan_stamp_ = recovery_scan_stamp_;
-        if (replace_standing) {
-          // Re-anchor only after Fablab's fresh scan independently matches the
-          // requested blocker. Enclose every excluded scan point at the new center.
-          obstacle_.center = *stationary_blocker;
-          for (std::size_t i = 0; i < obstacle_.member.size(); ++i) {
-            if (obstacle_.member[i]) {
-              obstacle_.radius = std::max(obstacle_.radius,
-                fablab_avoidance::distance(scan_points_[i], obstacle_.center));
-            }
-          }
-        }
-        insertDetour(robot, start, goal, true, replace_standing);
+        insertDetour(robot, start, goal, true);
       }
       return;
     }
@@ -720,7 +701,7 @@ private:
   }
 
   void insertDetour(const fablab_avoidance::Point & robot, const fablab_avoidance::Point & start,
-    const fablab_avoidance::Point & goal, bool stationary, bool replace_standing = false)
+    const fablab_avoidance::Point & goal, bool stationary)
   {
     // The scan can miss a wall the legs pass (occluded, or a poor return at a distance), so the
     // legs are also checked against the occupied cells of the static map around the robot
@@ -735,15 +716,8 @@ private:
       obstacle.radius = std::max(obstacle.radius, 0.30);
       params.clearance = rejoin_clearance;
       if (standing_center_gap_ > 0.0) {
-        // With the trial's 0.52 m base and 0.30 m blocker, 0.08 m plus
-        // the planner buffer gives a 1.00 m centre gap.
-        const double clearance_floor = standing_center_gap_ == 1.00 && avoid_params_.clearance == 0.10 ?
-          0.08 : avoid_params_.clearance;
-        params.clearance = std::max(clearance_floor,
+        params.clearance = std::max(avoid_params_.clearance,
           standing_center_gap_ - params.robot_radius - obstacle.radius - kAvoidPlanningBuffer);
-        if (replace_standing) {
-          params.clearance += 0.04;
-        }
       }
     }
     const auto inserted = fablab_avoidance::planAvoidance(
@@ -754,21 +728,13 @@ private:
       // braking check above stops the robot if no pair is found before d_brake.
       return;
     }
-    if (replace_standing) {
-      if (!fablab_avoidance::replaceDetour(waypoints_, current_segment_, avoid_end_segment_, inserted)) {
-        return;
-      }
-      avoid_latched_ = false;
-      avoid_release_count_ = recovery_wait_cycles_ = 0;
-    } else {
-      const auto position = waypoints_.begin() + static_cast<std::ptrdiff_t>(current_segment_ + 1);
-      std::vector<std::pair<double, double>> pair;
-      for (const auto & point : inserted) {
-        pair.emplace_back(point.x, point.y);
-      }
-      waypoints_.insert(position, pair.begin(), pair.end());
-      ++current_segment_;  // the active segment is now R -> A
+    const auto position = waypoints_.begin() + static_cast<std::ptrdiff_t>(current_segment_ + 1);
+    std::vector<std::pair<double, double>> pair;
+    for (const auto & point : inserted) {
+      pair.emplace_back(point.x, point.y);
     }
+    waypoints_.insert(position, pair.begin(), pair.end());
+    ++current_segment_;  // the active segment is now R -> A
     avoid_end_segment_ = current_segment_ + inserted.size();
     stationary_detour_ = stationary;
     if (stationary) {
