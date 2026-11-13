@@ -51,7 +51,7 @@ def generate_launch_description():
         default_value=os.path.join(
             get_package_share_directory("carrierbot_bringup"),
             "maps",
-            "new_map2.yaml"
+            "b1_lab_map.yaml"
         ),
         description="Full path to the map YAML file"
     )
