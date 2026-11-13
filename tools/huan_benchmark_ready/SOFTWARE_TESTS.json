@@ -1,0 +1,15 @@
+{
+  "toolset": "huan-fablab-integration-8-final-approach",
+  "tests_run": 153,
+  "failures": 0,
+  "errors": 0,
+  "passed": true,
+  "elapsed_s": 1.2909185999997135,
+  "live_ros_gazebo_verified": false,
+  "python38_syntax_files": 59,
+  "cpp_offline_checks": {
+    "behavior_gate_and_approach": 22,
+    "recovery": 19
+  },
+  "cli_ramp_requires_early_rejoin": true
+}

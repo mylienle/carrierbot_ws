@@ -1,0 +1,11 @@
+{
+  "source": "Huan 2026-11-06 export; these files match reviewed 2026-11-03 core",
+  "normalized_sha256": {
+    "src/profile_capture.py": "321565c5cfcf32a6c152b481a4289480e9157e8e3a181b03789eeb3520b345bc",
+    "src/odom_velocity_estimator.py": "aa688ad646960a287834a7ba2bdc049acd13787201dbd082545d61d105998fdb",
+    "src/tf_capture.py": "6300fdaeb7249a06a9234f6ea76b28b4abd89a76b15d1bbe4fde6d9640928a42",
+    "src/ros_capture.py": "c92e88f43fc53baeb68d74e3138187047acd58950e248b913e86034b46659185",
+    "src/torso_depth.py": "0c5eb7622e50f8471468824c7bfcd3165c5b5333166ef469a71128f65bcbde26",
+    "src/track_history.py": "53e3b03851739e1463bf00fd17557ca3891480ad3b1dd38683287416c3d4ac2e"
+  }
+}

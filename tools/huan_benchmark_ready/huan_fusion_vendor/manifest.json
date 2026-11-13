@@ -1,0 +1,62 @@
+{
+  "source_archive": "gazebo-six-20261106-154924.tar.gz",
+  "carrierbot_head": "5f8b38d45bd2e1648310cc00d77b9142e8da18ca",
+  "upstream_directory": "vision/simulation/bearing_stability_20261105",
+  "adaptation": "Only sibling import paths changed to package-relative imports; algorithms and thresholds preserved",
+  "files": {
+    "handoff.py": {
+      "upstream_path": "vision/simulation/bearing_stability_20261105/handoff.py",
+      "upstream_sha256": "247644d80bff5cd6020b95d710a43a4a67c64dc4af98a3b887c56093608bc170",
+      "vendored_sha256": "a24ffa0409411fe80bb3bb63f70c538d7b5e9415eec058f58b87ed59187e3327",
+      "upstream_normalized_sha256": "247644d80bff5cd6020b95d710a43a4a67c64dc4af98a3b887c56093608bc170"
+    },
+    "base_handoff.py": {
+      "upstream_path": "vision/simulation/bearing_stability_20261105/base_handoff.py",
+      "upstream_sha256": "9b020d8609738d207271565b0e84d3f9d1a02aeb45b45176996512571b910775",
+      "vendored_sha256": "6af563545b657a2cfd8ba8fdab9f5bf2194e033b3f614a999ef43aae5e04dc9e",
+      "upstream_normalized_sha256": "9b020d8609738d207271565b0e84d3f9d1a02aeb45b45176996512571b910775"
+    },
+    "reacquisition.py": {
+      "upstream_path": "vision/simulation/bearing_stability_20261105/reacquisition.py",
+      "upstream_sha256": "8e1e0b98da3fb63eb6219cb84817cc00af43ca274ae89faf6f2379d2e58060ba",
+      "vendored_sha256": "645041daa3408b01cffb351165dcacdd80c7bc5a07cb7bb3d610482c523d929b",
+      "upstream_normalized_sha256": "8e1e0b98da3fb63eb6219cb84817cc00af43ca274ae89faf6f2379d2e58060ba"
+    },
+    "bearing_support.py": {
+      "upstream_path": "vision/simulation/bearing_stability_20261105/bearing_support.py",
+      "upstream_sha256": "a3414176e32fbbbc2014d94362356eaaede047058c10d750bccbe69543c92044",
+      "vendored_sha256": "2050f2f4449c8e63c7b07783742f8d2e2e25dad87c865335f35dfd844f3d6b6f",
+      "upstream_normalized_sha256": "a3414176e32fbbbc2014d94362356eaaede047058c10d750bccbe69543c92044"
+    },
+    "dynamic_obstacles.py": {
+      "upstream_path": "vision/simulation/bearing_stability_20261105/dynamic_obstacles.py",
+      "upstream_sha256": "0731ff4a731d2c2437fb1f5a0178d5e4056e0feea12db98521f29ab4f49d0511",
+      "vendored_sha256": "893cb746b0c7bdfe4a9cbc75178797da5c08f8937f64ad02589149006848b918",
+      "upstream_normalized_sha256": "0731ff4a731d2c2437fb1f5a0178d5e4056e0feea12db98521f29ab4f49d0511"
+    },
+    "vision_contract.py": {
+      "upstream_path": "vision/simulation/bearing_stability_20261105/vision_contract.py",
+      "upstream_sha256": "d3867ecae1f2ad3f415e74d26bb86171265c8204410d00be00c519791acff6da",
+      "vendored_sha256": "d3867ecae1f2ad3f415e74d26bb86171265c8204410d00be00c519791acff6da",
+      "upstream_normalized_sha256": "d3867ecae1f2ad3f415e74d26bb86171265c8204410d00be00c519791acff6da"
+    },
+    "publication_guard.py": {
+      "upstream_path": "vision/simulation/bearing_stability_20261105/publication_guard.py",
+      "upstream_sha256": "a87e289a977905e367ccce35909d6f5d35c5c9c54d00f059d8904c29374b5499",
+      "vendored_sha256": "1be7a18e14512aa810f68181c40b5d6b1b4f54b9bd8646ea94089d3c6072e829",
+      "upstream_normalized_sha256": "a87e289a977905e367ccce35909d6f5d35c5c9c54d00f059d8904c29374b5499"
+    },
+    "sim_clock_feed.py": {
+      "upstream_path": "vision/simulation/bearing_stability_20261105/sim_clock_feed.py",
+      "upstream_sha256": "02ef9dd1aa268f1ddcd813b2aea2a19893e2b5199c9b2c3e050be905b92feb50",
+      "vendored_sha256": "02ef9dd1aa268f1ddcd813b2aea2a19893e2b5199c9b2c3e050be905b92feb50",
+      "upstream_normalized_sha256": "02ef9dd1aa268f1ddcd813b2aea2a19893e2b5199c9b2c3e050be905b92feb50"
+    },
+    "responsive_filter.py": {
+      "upstream_path": "vision/simulation/visibility_dev/responsive_filter.py",
+      "upstream_sha256": "c28a9231a35e0d7ac278e4d25451e5866aa6ac981bf27f0852951c30a166fa14",
+      "vendored_sha256": "c28a9231a35e0d7ac278e4d25451e5866aa6ac981bf27f0852951c30a166fa14",
+      "upstream_normalized_sha256": "c28a9231a35e0d7ac278e4d25451e5866aa6ac981bf27f0852951c30a166fa14"
+    }
+  }
+}

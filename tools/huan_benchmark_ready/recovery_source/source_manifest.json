@@ -1,0 +1,5 @@
+{
+  "src/fablab_guidance_node.cpp": "eceeb38748dff381e37d70e75f2b88c92d8858555ab61c7332b3344c11da4e8b",
+  "src/obstacle_avoidance.hpp": "390d9ab468ce13dd824d3da70b2074e37de1bdf8566bc994c1f8fdb082e8375c",
+  "CMakeLists.txt": "d7d71234e06489e429d6fafcbf0248fa4e4e5318fb72fc8b402b2e743a644f3c"
+}
