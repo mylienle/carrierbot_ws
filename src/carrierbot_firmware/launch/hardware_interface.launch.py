@@ -1,5 +1,7 @@
 import os
 import glob
+import tempfile
+import yaml
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, LogInfo
 from launch_ros.parameter_descriptions import ParameterValue
@@ -56,6 +58,19 @@ def generate_launch_description():
         parameters=[{"robot_description": robot_description}]
     )
 
+    # Both launches that include this one (real_robot, slam_toolbox) run the EKF, which publishes
+    # odom->base_footprint. A second publisher from the diff drive controller (enable_odom_tf: true,
+    # e.g. a local edit kept for mapping) makes the pose flip between two yaws every cycle, so the
+    # controller TF is always switched off here, whatever controller.yaml says.
+    with open(os.path.join(
+            get_package_share_directory("carrierbot_controller"), "config", "controller.yaml")) as f:
+        controller_config = yaml.safe_load(f)
+    controller_config["carrierbot_controller"]["ros__parameters"]["enable_odom_tf"] = False
+    with tempfile.NamedTemporaryFile(
+            "w", prefix="carrierbot_controller_", suffix=".yaml", delete=False) as f:
+        yaml.safe_dump(controller_config, f)
+        controller_params = f.name
+
     controller_manager = Node(
         package="controller_manager",
         executable="ros2_control_node",
@@ -64,11 +79,7 @@ def generate_launch_description():
             'robot_description': robot_description,
             'use_sim_time': use_sim_time
             },
-            os.path.join(
-                get_package_share_directory("carrierbot_controller"),
-                "config",
-                "controller.yaml"
-            )
+            controller_params
         ],
         remappings=[
             ("/carrierbot_controller/cmd_vel_unstamped", "/cmd_vel")
