@@ -10,23 +10,26 @@ ekf_filter_node:
     base_link_frame: base_footprint
     world_frame: odom
 
-    # Odometry (wheel encoders)
+    # Only rates are fused, never an absolute yaw: wheel yaw (slips on pivot turns) and the BNO055
+    # yaw (magnetometer, bent by the steel at the B1 stairs) disagree after a turn, and fusing both
+    # made the EKF yaw flip ~0.4 rad between them every cycle. AMCL is the only absolute heading.
+    # Odometry (wheel encoders): speed, and yaw rate as backup when the IMU drops out
     odom0: /odom
     odom0_config:
           [ false, false, false,   # x, y, z
-            false, false, true,    # roll, pitch, yaw
+            false, false, false,   # roll, pitch, yaw
             true,  true,  false,   # vx, vy, vz
-            false, false, false,    # vroll, vpitch, vyaw
+            false, false, true,    # vroll, vpitch, vyaw
             false, false, false ]   # ax, ay, az
     odom0_twist_rejection_threshold: 10.0
 
-    # IMU (gyro for yaw rate, accelerometer)
+    # IMU: gyro yaw rate only (no magnetometer yaw)
     imu0: /imu/data
     imu0_differential: false
     imu0_relative: false
     imu0_config:
           [ false, false, false,
-            false, false, true,
+            false, false, false,
             false, false, false,
             false, false, true,
             false, false, false  ]  # ax, ay, az
