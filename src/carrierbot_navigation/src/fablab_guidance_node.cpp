@@ -45,7 +45,9 @@ constexpr double kMaxSpeed = 1.2;
 constexpr double kMaxYawRate = 2.0;
 constexpr double kPoseSlack = 0.05;
 constexpr double kYawSlack = 0.05;
-// Largest map->odom (AMCL) correction between two cycles accepted while driving
+// Largest move of the robot's map pose caused by one map->odom (AMCL) correction update. Measured
+// on the robot, not on the map->odom translation: a 0.7 deg AMCL yaw update moves that translation
+// by 0.3 m when the robot is 25 m from the odom origin, which held the robot at nearly every B1 turn
 constexpr double kCorrectionJump = 0.3;
 constexpr double kCorrectionYawJump = 0.25;
 // Consistent cycles needed after a fault before driving again (1.5 s at 10 Hz)
@@ -753,8 +755,13 @@ private:
         {
           fault = "odometry jumped (two odom->base_footprint publishers?)";
         } else if (
-          std::hypot(correction_x - last_correction_x_, correction_y - last_correction_y_) >
-          kCorrectionJump ||
+          std::hypot(
+            correction_x - last_correction_x_ +
+            (std::cos(correction_yaw) - std::cos(last_correction_yaw_)) * odom_x -
+            (std::sin(correction_yaw) - std::sin(last_correction_yaw_)) * odom_y,
+            correction_y - last_correction_y_ +
+            (std::sin(correction_yaw) - std::sin(last_correction_yaw_)) * odom_x +
+            (std::cos(correction_yaw) - std::cos(last_correction_yaw_)) * odom_y) > kCorrectionJump ||
           std::abs(normalizeAngle(correction_yaw - last_correction_yaw_)) > kCorrectionYawJump)
         {
           fault = "AMCL pose jumped";
