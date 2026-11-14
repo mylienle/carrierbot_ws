@@ -19,9 +19,9 @@
 #include "nav_msgs/msg/occupancy_grid.hpp"
 #include "obstacle_avoidance.hpp"
 #include "rclcpp/rclcpp.hpp"
-#include "sensor_msgs/msg/joy.hpp"
 #include "sensor_msgs/msg/laser_scan.hpp"
 #include "std_msgs/msg/bool.hpp"
+#include "std_msgs/msg/int32.hpp"
 #include "tf2_ros/buffer.h"
 #include "tf2_ros/transform_listener.h"
 
@@ -50,18 +50,10 @@ constexpr double kCorrectionJump = 0.3;
 constexpr double kCorrectionYawJump = 0.25;
 // Consistent cycles needed after a fault before driving again (1.5 s at 10 Hz)
 constexpr int kPoseSettleCycles = 15;
-// Gamepad override (joy_node -> /joy): START toggles between the route and manual driving with
-// the left stick. Indices of the generic 2.4 GHz "Twin USB" pad; check them with
-// ros2 topic echo /joy. MODE on that pad only swaps stick/D-pad inside the pad and sends nothing.
-constexpr std::size_t kManualToggleButton = 9;  // START
-constexpr std::size_t kManualAxisLinear = 1;    // left stick up/down
-constexpr std::size_t kManualAxisAngular = 0;   // left stick left/right
-constexpr double kManualLinearSpeed = 0.3;
-constexpr double kManualAngularSpeed = 0.6;
-// Stop when /joy goes quiet this long (pad out of range or dongle unplugged)
-constexpr double kManualTimeout = 0.5;
-// START presses closer together than this are contact bounce of a cheap pad, not a second press
-constexpr double kManualToggleDebounce = 0.5;
+// Drive mode switch (/carrierbot/drive_mode, from the GUI via MQTT robot/drive_mode): the
+// firmware sends it on CAN 0x020. 1 = the board drives from the gamepad, 2 = autonomous.
+constexpr int kDriveModeGamepad = 1;
+constexpr int kDriveModeAuto = 2;
 // The bridge publishes a whole route within milliseconds; a waypoint arriving later than this
 // after the previous one is a new mission and replaces the unfinished route
 constexpr double kNewMissionGap = 1.0;
@@ -202,8 +194,9 @@ public:
     waypoint_subscription_ = create_subscription<geometry_msgs::msg::PoseStamped>(
       waypoint_topic_, 100,
       std::bind(&FablabGuidanceNode::waypointCallback, this, std::placeholders::_1));
-    joy_subscription_ = create_subscription<sensor_msgs::msg::Joy>(
-      "/joy", 10, std::bind(&FablabGuidanceNode::joyCallback, this, std::placeholders::_1));
+    drive_mode_subscription_ = create_subscription<std_msgs::msg::Int32>(
+      "/carrierbot/drive_mode", 10,
+      std::bind(&FablabGuidanceNode::driveModeCallback, this, std::placeholders::_1));
     if (avoidance_enabled_) {
       map_subscription_ = create_subscription<nav_msgs::msg::OccupancyGrid>(
         map_topic_, rclcpp::QoS(1).transient_local().reliable(),
@@ -813,38 +806,23 @@ private:
     integral_ = 0.0;
   }
 
-  // START pressed: pause the route and drive by hand; pressed again: resume the route
-  void joyCallback(const sensor_msgs::msg::Joy::SharedPtr message)
+  // Mode 1: the board drives from the gamepad, so pause the route; mode 2: resume it
+  void driveModeCallback(const std_msgs::msg::Int32::SharedPtr message)
   {
-    const rclcpp::Time now = get_clock()->now();
-    last_manual_time_ = now;
-    manual_received_ = true;
-    const bool pressed = message->buttons.size() > kManualToggleButton &&
-      message->buttons[kManualToggleButton] != 0;
-    if (pressed && !manual_toggle_pressed_ &&
-      (last_toggle_time_.nanoseconds() == 0 ||
-      (now - last_toggle_time_).seconds() > kManualToggleDebounce))
-    {
-      last_toggle_time_ = now;
-      manual_active_ = !manual_active_;
-      if (manual_active_) {
-        manual_resume_pending_ = false;
-        RCLCPP_WARN(get_logger(), "Manual override (START): gamepad drives, route paused");
-      } else {
-        // Resumed in controlCallback with that cycle's checked pose: x_ here may still be the
-        // older /amcl_pose written by poseCallback
-        manual_resume_pending_ = true;
-      }
-    }
-    manual_toggle_pressed_ = pressed;
-    manual_command_ = geometry_msgs::msg::Twist();
-    if (message->axes.size() > std::max(kManualAxisLinear, kManualAxisAngular)) {
-      manual_command_.linear.x = kManualLinearSpeed * message->axes[kManualAxisLinear];
-      manual_command_.angular.z = kManualAngularSpeed * message->axes[kManualAxisAngular];
+    if (message->data == kDriveModeGamepad && !manual_active_) {
+      manual_active_ = true;
+      manual_resume_pending_ = false;
+      RCLCPP_WARN(get_logger(), "Drive mode 1 (gamepad): route paused");
+    } else if (message->data == kDriveModeAuto && manual_active_) {
+      manual_active_ = false;
+      // Resumed in controlCallback with that cycle's checked pose: x_ here may still be the
+      // older /amcl_pose written by poseCallback
+      manual_resume_pending_ = true;
+      RCLCPP_WARN(get_logger(), "Drive mode 2 (auto): resuming the route");
     }
   }
 
-  // While manual: the stick command goes straight to /cmd_vel and the route is paused (no
+  // While in gamepad mode the board ignores /cmd_vel; publish zero and pause the route (no
   // avoidance, no waypoint progress). Returns true while it owns /cmd_vel.
   bool updateManualOverride()
   {
@@ -856,10 +834,6 @@ private:
       pose_was_held_ = true;
     }
     geometry_msgs::msg::Twist command;
-    if (manual_received_ && (get_clock()->now() - last_manual_time_).seconds() <= kManualTimeout) {
-      command.linear.x = clamp(manual_command_.linear.x, -max_linear_speed_, max_linear_speed_);
-      command.angular.z = clamp(manual_command_.angular.z, -max_angular_speed_, max_angular_speed_);
-    }
     last_linear_cmd_ = 0.0;  // the route restarts with the normal speed ramp
     cmd_publisher_->publish(command);
     writeGuidanceLog(command);
@@ -1028,13 +1002,8 @@ private:
   double last_correction_yaw_{0.0};
   int pose_hold_cycles_{0};
   bool pose_was_held_{false};
-  geometry_msgs::msg::Twist manual_command_;
-  rclcpp::Time last_manual_time_{0, 0, RCL_ROS_TIME};
-  bool manual_received_{false};
   bool manual_active_{false};
-  bool manual_toggle_pressed_{false};
   bool manual_resume_pending_{false};
-  rclcpp::Time last_toggle_time_{0, 0, RCL_ROS_TIME};
   rclcpp::Time last_waypoint_time_{0, 0, RCL_ROS_TIME};
   bool has_pose_{false};
   bool finished_{false};
@@ -1075,7 +1044,7 @@ private:
   rclcpp::Subscription<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr pose_subscription_;
   rclcpp::Subscription<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr initial_pose_subscription_;
   rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr waypoint_subscription_;
-  rclcpp::Subscription<sensor_msgs::msg::Joy>::SharedPtr joy_subscription_;
+  rclcpp::Subscription<std_msgs::msg::Int32>::SharedPtr drive_mode_subscription_;
   rclcpp::Subscription<sensor_msgs::msg::LaserScan>::SharedPtr scan_subscription_;
   rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::SharedPtr map_subscription_;
   rclcpp::TimerBase::SharedPtr control_timer_;
