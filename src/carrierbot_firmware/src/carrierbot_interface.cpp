@@ -306,6 +306,13 @@ namespace carrierbot_firmware
         return hardware_interface::return_type::OK;
     }
 
+    bool CarrierbotInterface::encoderStale()
+    {
+        std::lock_guard<std::mutex> lock(state_mutex_);
+        return std::chrono::steady_clock::now() - last_encoder_time_ >
+               std::chrono::duration<double>(double{kEncoderTimeoutSec});
+    }
+
     void CarrierbotInterface::handleEncoderData(const std::vector<uint8_t> &data)
     {
         if (data.size() < 8)
@@ -321,6 +328,7 @@ namespace carrierbot_firmware
         std::lock_guard<std::mutex> lock(state_mutex_);
         raw_left_pulse_s_ = left_pulse;
         raw_right_pulse_s_ = right_pulse;
+        last_encoder_time_ = std::chrono::steady_clock::now();
     }
 
     void CarrierbotInterface::handleRfidData(const std::vector<uint8_t> &data)
@@ -382,6 +390,17 @@ namespace carrierbot_firmware
 
         int left_pulse = 0;
         int right_pulse = 0;
+        if (encoderStale())
+        {
+            static rclcpp::Clock warn_clock(RCL_STEADY_TIME);
+            // No 0x011 for a while: holding the last speed would make the EKF dead-reckon
+            // a phantom drive (log 003002 drifted ~10 m), so report the wheels as stopped.
+            RCLCPP_WARN_THROTTLE(
+                rclcpp::get_logger("CarrierbotInterface"), warn_clock, 1000,
+                "No encoder frame (CAN 0x011) for > %.1f s: wheel speed set to 0 and drive commands held at 0",
+                kEncoderTimeoutSec);
+        }
+        else
         {
             std::lock_guard<std::mutex> lock(state_mutex_);
             left_pulse = raw_left_pulse_s_;
@@ -467,7 +486,15 @@ namespace carrierbot_firmware
     {
         try
         {
-            sendWheelVelocities();
+            // Without encoder feedback the pose is blind, so do not let the robot drive on it
+            if (encoderStale())
+            {
+                sendZeroCommand();
+            }
+            else
+            {
+                sendWheelVelocities();
+            }
         }
         catch (const std::exception &e)
         {

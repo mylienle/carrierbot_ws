@@ -14,6 +14,7 @@
 #include <mutex>
 #include <thread>
 #include <atomic>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <functional>
@@ -50,6 +51,7 @@ namespace carrierbot_firmware
         static constexpr int kPulsePerRevolution = 10000;
         static constexpr double kVelocityScale = 20.0;  // same ×20 / ÷20 as v1
         static constexpr double kPi = 3.14159265358979323846;
+        static constexpr double kEncoderTimeoutSec = 0.5;  // board sends 0x011 every 50 ms poll
 
         void handleEncoderData(const std::vector<uint8_t> &data);
         void handleRfidData(const std::vector<uint8_t> &data);
@@ -60,6 +62,7 @@ namespace carrierbot_firmware
         void sendWheelVelocities();
         void sendDriveMode(int mode);
         void sendZeroCommand();
+        bool encoderStale();
         void sendCan(uint16_t can_id, const std::vector<uint8_t> &data);
         void startPollLoop();
         void stopPollLoop();
@@ -84,6 +87,8 @@ namespace carrierbot_firmware
         // Raw encoder pulses/s from CAN 0x011 (before ÷20 scale)
         int raw_left_pulse_s_{0};
         int raw_right_pulse_s_{0};
+        // Arrival time of the last 0x011 frame; a stale one must not be reused as wheel speed
+        std::chrono::steady_clock::time_point last_encoder_time_{};
         float voltage_{0.0f};
 
         rclcpp::Node::SharedPtr ros_node_;
