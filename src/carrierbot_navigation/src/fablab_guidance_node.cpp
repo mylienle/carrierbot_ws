@@ -19,6 +19,7 @@
 #include "nav_msgs/msg/occupancy_grid.hpp"
 #include "obstacle_avoidance.hpp"
 #include "rclcpp/rclcpp.hpp"
+#include "sensor_msgs/msg/joy.hpp"
 #include "sensor_msgs/msg/laser_scan.hpp"
 #include "std_msgs/msg/bool.hpp"
 #include "tf2_ros/buffer.h"
@@ -49,6 +50,18 @@ constexpr double kCorrectionJump = 0.3;
 constexpr double kCorrectionYawJump = 0.25;
 // Consistent cycles needed after a fault before driving again (1.5 s at 10 Hz)
 constexpr int kPoseSettleCycles = 15;
+// Gamepad override (joy_node -> /joy): START toggles between the route and manual driving with
+// the left stick. Indices of the generic 2.4 GHz "Twin USB" pad; check them with
+// ros2 topic echo /joy. MODE on that pad only swaps stick/D-pad inside the pad and sends nothing.
+constexpr std::size_t kManualToggleButton = 9;  // START
+constexpr std::size_t kManualAxisLinear = 1;    // left stick up/down
+constexpr std::size_t kManualAxisAngular = 0;   // left stick left/right
+constexpr double kManualLinearSpeed = 0.3;
+constexpr double kManualAngularSpeed = 0.6;
+// Stop when /joy goes quiet this long (pad out of range or dongle unplugged)
+constexpr double kManualTimeout = 0.5;
+// START presses closer together than this are contact bounce of a cheap pad, not a second press
+constexpr double kManualToggleDebounce = 0.5;
 // The bridge publishes a whole route within milliseconds; a waypoint arriving later than this
 // after the previous one is a new mission and replaces the unfinished route
 constexpr double kNewMissionGap = 1.0;
@@ -189,6 +202,8 @@ public:
     waypoint_subscription_ = create_subscription<geometry_msgs::msg::PoseStamped>(
       waypoint_topic_, 100,
       std::bind(&FablabGuidanceNode::waypointCallback, this, std::placeholders::_1));
+    joy_subscription_ = create_subscription<sensor_msgs::msg::Joy>(
+      "/joy", 10, std::bind(&FablabGuidanceNode::joyCallback, this, std::placeholders::_1));
     if (avoidance_enabled_) {
       map_subscription_ = create_subscription<nav_msgs::msg::OccupancyGrid>(
         map_topic_, rclcpp::QoS(1).transient_local().reliable(),
@@ -211,7 +226,7 @@ public:
         "time_s,segment,amcl_x,amcl_y,amcl_yaw,start_x,start_y,goal_x,goal_y,"
         "cross_track,long_track,lookahead,target_heading,heading_error,remaining_distance,"
         "linear_cmd,angular_cmd,safety_stop,finished,"
-        "avoid_state,obstacle_x,obstacle_y,obstacle_r,obstacle_distance,pose_hold\n";
+        "avoid_state,obstacle_x,obstacle_y,obstacle_r,obstacle_distance,pose_hold,manual\n";
       RCLCPP_INFO(get_logger(), "Guidance CSV: %s", guidance_log_path_.c_str());
     } else {
       RCLCPP_WARN(get_logger(), "Cannot open guidance CSV: %s", guidance_log_path_.c_str());
@@ -798,14 +813,112 @@ private:
     integral_ = 0.0;
   }
 
+  // START pressed: pause the route and drive by hand; pressed again: resume the route
+  void joyCallback(const sensor_msgs::msg::Joy::SharedPtr message)
+  {
+    const rclcpp::Time now = get_clock()->now();
+    last_manual_time_ = now;
+    manual_received_ = true;
+    const bool pressed = message->buttons.size() > kManualToggleButton &&
+      message->buttons[kManualToggleButton] != 0;
+    if (pressed && !manual_toggle_pressed_ &&
+      (last_toggle_time_.nanoseconds() == 0 ||
+      (now - last_toggle_time_).seconds() > kManualToggleDebounce))
+    {
+      last_toggle_time_ = now;
+      manual_active_ = !manual_active_;
+      if (manual_active_) {
+        manual_resume_pending_ = false;
+        RCLCPP_WARN(get_logger(), "Manual override (START): gamepad drives, route paused");
+      } else {
+        // Resumed in controlCallback with that cycle's checked pose: x_ here may still be the
+        // older /amcl_pose written by poseCallback
+        manual_resume_pending_ = true;
+      }
+    }
+    manual_toggle_pressed_ = pressed;
+    manual_command_ = geometry_msgs::msg::Twist();
+    if (message->axes.size() > std::max(kManualAxisLinear, kManualAxisAngular)) {
+      manual_command_.linear.x = kManualLinearSpeed * message->axes[kManualAxisLinear];
+      manual_command_.angular.z = kManualAngularSpeed * message->axes[kManualAxisAngular];
+    }
+  }
+
+  // While manual: the stick command goes straight to /cmd_vel and the route is paused (no
+  // avoidance, no waypoint progress). Returns true while it owns /cmd_vel.
+  bool updateManualOverride()
+  {
+    if (!manual_active_) {
+      return false;
+    }
+    // Keep the pose and its jump history current, so the route resumes from where the robot is
+    if (!updatePose()) {
+      pose_was_held_ = true;
+    }
+    geometry_msgs::msg::Twist command;
+    if (manual_received_ && (get_clock()->now() - last_manual_time_).seconds() <= kManualTimeout) {
+      command.linear.x = clamp(manual_command_.linear.x, -max_linear_speed_, max_linear_speed_);
+      command.angular.z = clamp(manual_command_.angular.z, -max_angular_speed_, max_angular_speed_);
+    }
+    last_linear_cmd_ = 0.0;  // the route restarts with the normal speed ramp
+    cmd_publisher_->publish(command);
+    writeGuidanceLog(command);
+    return true;
+  }
+
+  // Continue the route from where the operator left the robot: drop a detour planned before the
+  // override, skip waypoints already reached or passed, and drive from the current pose straight
+  // to the next waypoint after turning towards it in place
+  void resumeAfterManual()
+  {
+    manual_resume_pending_ = false;
+    if (!has_pose_ || finished_ || current_segment_ + 1 >= waypoints_.size()) {
+      RCLCPP_INFO(get_logger(), "Manual override ended; no route to resume");
+      return;
+    }
+    if (current_segment_ + 1 < avoid_end_segment_ && avoid_end_segment_ < waypoints_.size()) {
+      waypoints_.erase(
+        waypoints_.begin() + static_cast<std::ptrdiff_t>(current_segment_ + 1),
+        waypoints_.begin() + static_cast<std::ptrdiff_t>(avoid_end_segment_));
+    }
+    resetAvoidance();
+    while (current_segment_ + 2 < waypoints_.size()) {
+      const auto & start = waypoints_[current_segment_];
+      const auto & goal = waypoints_[current_segment_ + 1];
+      const double length = std::hypot(goal.first - start.first, goal.second - start.second);
+      const double along = length <= 1e-6 ? 0.0 :
+        ((x_ - start.first) * (goal.first - start.first) +
+        (y_ - start.second) * (goal.second - start.second)) / length;
+      if (length > 1e-6 && along < length - goal_radius_) {
+        break;
+      }
+      ++current_segment_;
+    }
+    waypoints_[current_segment_] = {x_, y_};
+    start_alignment_pending_ = true;
+    start_alignment_active_ = false;
+    filtered_derivative_ = 0.0;
+    integral_ = 0.0;
+    RCLCPP_WARN(
+      get_logger(), "Manual override ended; resuming towards waypoint %zu (%.2f, %.2f)",
+      current_segment_ + 1, waypoints_[current_segment_ + 1].first,
+      waypoints_[current_segment_ + 1].second);
+  }
+
   void controlCallback()
   {
+    if (updateManualOverride()) {
+      return;
+    }
     if (!has_pose_) {
       cmd_publisher_->publish(geometry_msgs::msg::Twist());
       return;
     }
     const bool pose_ok = updatePose();
     if (pose_ok) {
+      if (manual_resume_pending_) {
+        resumeAfterManual();
+      }
       updateAvoidance();
       updateRoute();
     } else {
@@ -850,7 +963,7 @@ private:
                   << (obstacle_.found ? obstacle_.center.x : 0.0) << ','
                   << (obstacle_.found ? obstacle_.center.y : 0.0) << ','
                   << obstacle_.radius << ',' << obstacle_.surface_distance << ','
-                  << (pose_was_held_ ? 1 : 0) << '\n';
+                  << (pose_was_held_ ? 1 : 0) << ',' << (manual_active_ ? 1 : 0) << '\n';
     guidance_log_.flush();
   }
 
@@ -915,6 +1028,13 @@ private:
   double last_correction_yaw_{0.0};
   int pose_hold_cycles_{0};
   bool pose_was_held_{false};
+  geometry_msgs::msg::Twist manual_command_;
+  rclcpp::Time last_manual_time_{0, 0, RCL_ROS_TIME};
+  bool manual_received_{false};
+  bool manual_active_{false};
+  bool manual_toggle_pressed_{false};
+  bool manual_resume_pending_{false};
+  rclcpp::Time last_toggle_time_{0, 0, RCL_ROS_TIME};
   rclcpp::Time last_waypoint_time_{0, 0, RCL_ROS_TIME};
   bool has_pose_{false};
   bool finished_{false};
@@ -955,6 +1075,7 @@ private:
   rclcpp::Subscription<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr pose_subscription_;
   rclcpp::Subscription<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr initial_pose_subscription_;
   rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr waypoint_subscription_;
+  rclcpp::Subscription<sensor_msgs::msg::Joy>::SharedPtr joy_subscription_;
   rclcpp::Subscription<sensor_msgs::msg::LaserScan>::SharedPtr scan_subscription_;
   rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::SharedPtr map_subscription_;
   rclcpp::TimerBase::SharedPtr control_timer_;

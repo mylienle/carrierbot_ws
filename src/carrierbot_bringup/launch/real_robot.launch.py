@@ -251,6 +251,20 @@ def generate_launch_description():
         ])),
     )
 
+    # Gamepad override: START pauses the route and the left stick drives; START again resumes the
+    # route (handled in fablab_guidance_node, which reads /joy). Skipped when the joy package is
+    # not installed (sudo apt install ros-foxy-joy).
+    try:
+        get_package_share_directory("joy")
+        gamepad = [Node(
+            package="joy",
+            executable="joy_node",
+            name="joy_node",
+            parameters=[{"device_id": 0, "deadzone": 0.1, "autorepeat_rate": 20.0}],
+        )]
+    except Exception:
+        gamepad = [LogInfo(msg="joy not installed: gamepad override disabled")]
+
     mqtt_subscriber = Node(
         package="carrierbot_mqtt",
         executable="goal_subscriber",
@@ -332,4 +346,5 @@ def generate_launch_description():
         TimerAction(period=14.0, actions=[mqtt_rfid]),
         TimerAction(period=14.0, actions=[mqtt_location]),
         TimerAction(period=14.0, actions=[mqtt_velocity]),
+        TimerAction(period=14.0, actions=gamepad),
     ])
