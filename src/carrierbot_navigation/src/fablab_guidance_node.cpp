@@ -49,6 +49,9 @@ constexpr double kCorrectionJump = 0.3;
 constexpr double kCorrectionYawJump = 0.25;
 // Consistent cycles needed after a fault before driving again (1.5 s at 10 Hz)
 constexpr int kPoseSettleCycles = 15;
+// The bridge publishes a whole route within milliseconds; a waypoint arriving later than this
+// after the previous one is a new mission and replaces the unfinished route
+constexpr double kNewMissionGap = 1.0;
 
 double yawOf(const geometry_msgs::msg::Quaternion & q)
 {
@@ -243,8 +246,18 @@ private:
 
   void waypointCallback(const geometry_msgs::msg::PoseStamped::SharedPtr message)
   {
-    if (arrival_published_ && (!waypoints_.empty() || !pending_waypoints_.empty())) {
-      RCLCPP_WARN(get_logger(), "New mission received; resetting completed Fablab route");
+    // The GUI Cancel button sends nothing to the robot, so a goal picked after a cancel used to be
+    // appended to the old route (robot went back to the old one) and the stack had to be restarted
+    const rclcpp::Time now = get_clock()->now();
+    const bool new_burst = last_waypoint_time_.nanoseconds() != 0 &&
+      (now - last_waypoint_time_).seconds() > kNewMissionGap;
+    last_waypoint_time_ = now;
+    if ((arrival_published_ || new_burst) &&
+      (!waypoints_.empty() || !pending_waypoints_.empty()))
+    {
+      RCLCPP_WARN(
+        get_logger(), "New mission received; replacing the %s Fablab route",
+        arrival_published_ ? "completed" : "unfinished");
       waypoints_.clear();
       pending_waypoints_.clear();
       current_segment_ = 0;
@@ -902,6 +915,7 @@ private:
   double last_correction_yaw_{0.0};
   int pose_hold_cycles_{0};
   bool pose_was_held_{false};
+  rclcpp::Time last_waypoint_time_{0, 0, RCL_ROS_TIME};
   bool has_pose_{false};
   bool finished_{false};
   bool start_alignment_pending_{false};
