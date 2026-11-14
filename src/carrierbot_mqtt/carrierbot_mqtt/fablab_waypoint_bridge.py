@@ -32,12 +32,20 @@ class FablabWaypointBridge(Node):
         self.waypoint_publisher = self.create_publisher(PoseStamped, '/fablab_waypoints', 100)
         self.create_subscription(Bool, '/fablab_arrival', self.arrival_callback, 10)
 
+        # Arrival that could not be sent while the broker link was down; sent on reconnect
+        self.arrival_pending = False
+
         self.mqtt_client = mqtt.Client()
         self.mqtt_client.username_pw_set(MQTT_USERNAME, MQTT_PASSWORD)
         self.mqtt_client.on_connect = self.on_connect
+        self.mqtt_client.on_disconnect = self.on_disconnect
         self.mqtt_client.on_message = self.on_message
-        self.mqtt_client.connect(MQTT_HOST, MQTT_PORT, MQTT_KEEPALIVE_INTERVAL)
-        self.create_timer(0.1, self.mqtt_loop_callback)
+        # loop_start() reconnects by itself after a Wi-Fi drop; the old manual loop() never did,
+        # so after one drop no waypoint reached the robot and no arrival reached the GUI.
+        # connect_async: a broker not reachable yet at launch is retried instead of killing the node
+        self.mqtt_client.reconnect_delay_set(min_delay=1, max_delay=5)
+        self.mqtt_client.connect_async(MQTT_HOST, MQTT_PORT, MQTT_KEEPALIVE_INTERVAL)
+        self.mqtt_client.loop_start()
 
         self.get_logger().info(
             f'Fablab waypoint bridge ready: MQTT {MQTT_TOPICS["waypoints"]} -> /fablab_waypoints')
@@ -45,6 +53,12 @@ class FablabWaypointBridge(Node):
     def on_connect(self, client, _userdata, _flags, result_code):
         self.get_logger().info(f'Connected to MQTT broker (rc={result_code})')
         client.subscribe(MQTT_TOPICS['waypoints'], MQTT_QOS)
+        if self.arrival_pending:
+            self.publish_arrival()
+
+    def on_disconnect(self, _client, _userdata, result_code):
+        if result_code != 0:
+            self.get_logger().warning(f'MQTT broker connection lost (rc={result_code}); reconnecting')
 
     def on_message(self, _client, _userdata, message):
         try:
@@ -80,14 +94,16 @@ class FablabWaypointBridge(Node):
     def arrival_callback(self, message):
         if not message.data:
             return
-        result = self.mqtt_client.publish(MQTT_TOPICS['arrival'], 'true', qos=MQTT_QOS, retain=False)
-        if result.rc == mqtt.MQTT_ERR_SUCCESS:
-            self.get_logger().info(f'Published arrival to {MQTT_TOPICS["arrival"]}')
-        else:
-            self.get_logger().error(f'Could not publish arrival (rc={result.rc})')
+        self.publish_arrival()
 
-    def mqtt_loop_callback(self):
-        self.mqtt_client.loop(0.1)
+    def publish_arrival(self):
+        result = self.mqtt_client.publish(MQTT_TOPICS['arrival'], 'true', qos=MQTT_QOS, retain=False)
+        self.arrival_pending = result.rc != mqtt.MQTT_ERR_SUCCESS
+        if self.arrival_pending:
+            self.get_logger().error(
+                f'Could not publish arrival (rc={result.rc}); will resend on reconnect')
+        else:
+            self.get_logger().info(f'Published arrival to {MQTT_TOPICS["arrival"]}')
 
 
 def main(args=None):
@@ -98,6 +114,7 @@ def main(args=None):
     except KeyboardInterrupt:
         pass
     finally:
+        node.mqtt_client.loop_stop()
         node.destroy_node()
         rclpy.shutdown()
 
