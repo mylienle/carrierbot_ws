@@ -6,6 +6,7 @@
 #include <rclcpp/rclcpp.hpp>
 #include <carrierbot_msgs/msg/carrierbot_telemetry.hpp>
 #include <std_msgs/msg/float32.hpp>
+#include <std_msgs/msg/int32.hpp>
 #include <std_msgs/msg/string.hpp>
 #include "carrierbot_firmware/can_node.hpp"
 #include <vector>
@@ -53,6 +54,7 @@ namespace carrierbot_firmware
         void handleEncoderData(const std::vector<uint8_t> &data);
         void handleRfidData(const std::vector<uint8_t> &data);
         void onRotateAngle(const std_msgs::msg::Float32::SharedPtr msg);
+        void onDriveMode(const std_msgs::msg::Int32::SharedPtr msg);
         void sendRotateAngle(double angle_deg);
         void publishTelemetry();
         void sendWheelVelocities();
@@ -88,6 +90,7 @@ namespace carrierbot_firmware
         rclcpp::Publisher<carrierbot_msgs::msg::CarrierbotTelemetry>::SharedPtr telemetry_pub_;
         rclcpp::Publisher<std_msgs::msg::String>::SharedPtr rfid_pub_;
         rclcpp::Subscription<std_msgs::msg::Float32>::SharedPtr rotate_sub_;
+        rclcpp::Subscription<std_msgs::msg::Int32>::SharedPtr drive_mode_sub_;
         rclcpp::Time last_run_;
 
         std::thread poll_thread_;

@@ -90,6 +90,9 @@ namespace carrierbot_firmware
         rotate_sub_ = ros_node_->create_subscription<std_msgs::msg::Float32>(
             "/carrierbot/rotate_angle", 10,
             std::bind(&CarrierbotInterface::onRotateAngle, this, std::placeholders::_1));
+        drive_mode_sub_ = ros_node_->create_subscription<std_msgs::msg::Int32>(
+            "/carrierbot/drive_mode", 10,
+            std::bind(&CarrierbotInterface::onDriveMode, this, std::placeholders::_1));
 
         velocity_command_.assign(info_.joints.size(), 0.0);
         position_state_.assign(info_.joints.size(), 0.0);
@@ -182,6 +185,29 @@ namespace carrierbot_firmware
             RCLCPP_ERROR_STREAM(
                 rclcpp::get_logger("CarrierbotInterface"),
                 "Failed to send rotate CAN 0x040: " << e.what());
+        }
+    }
+
+    // Runtime mode switch (1 = gamepad, 2 = autonomous), like the old ROS1 can_node.
+    // Always re-sent: SELECT x3 on the pad toggles the board without telling us.
+    void CarrierbotInterface::onDriveMode(const std_msgs::msg::Int32::SharedPtr msg)
+    {
+        if (msg->data != 1 && msg->data != 2)
+        {
+            RCLCPP_WARN(rclcpp::get_logger("CarrierbotInterface"),
+                "Ignoring drive mode %d (only 1 or 2)", msg->data);
+            return;
+        }
+        try
+        {
+            sendDriveMode(msg->data);
+            drive_mode_ = msg->data;
+        }
+        catch (const std::exception &e)
+        {
+            RCLCPP_ERROR_STREAM(
+                rclcpp::get_logger("CarrierbotInterface"),
+                "Failed to send drive mode CAN 0x020: " << e.what());
         }
     }
 
