@@ -17,6 +17,7 @@ MQTT_TOPICS = {
     "battery": "robot/battery",
     "telemetry": "robot/telemetry",
     "xoay": "robot/xoay",
+    "drive_mode": "robot/drive_mode",
 }
 
 MQTT_QOS = 0

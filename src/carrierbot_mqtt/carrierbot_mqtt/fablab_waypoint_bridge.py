@@ -7,7 +7,7 @@ import paho.mqtt.client as mqtt
 import rclpy
 from geometry_msgs.msg import PoseStamped
 from rclpy.node import Node
-from std_msgs.msg import Bool
+from std_msgs.msg import Bool, Int32
 
 from .mqtt_config import (
     MQTT_HOST,
@@ -31,6 +31,8 @@ class FablabWaypointBridge(Node):
         super().__init__('fablab_waypoint_bridge')
         self.waypoint_publisher = self.create_publisher(PoseStamped, '/fablab_waypoints', 100)
         self.create_subscription(Bool, '/fablab_arrival', self.arrival_callback, 10)
+        # GUI mode button: 1 = gamepad, 2 = autonomous (firmware sends CAN 0x020, guidance pauses)
+        self.drive_mode_publisher = self.create_publisher(Int32, '/carrierbot/drive_mode', 10)
 
         # Arrival that could not be sent while the broker link was down; sent on reconnect
         self.arrival_pending = False
@@ -53,6 +55,7 @@ class FablabWaypointBridge(Node):
     def on_connect(self, client, _userdata, _flags, result_code):
         self.get_logger().info(f'Connected to MQTT broker (rc={result_code})')
         client.subscribe(MQTT_TOPICS['waypoints'], MQTT_QOS)
+        client.subscribe(MQTT_TOPICS['drive_mode'], MQTT_QOS)
         if self.arrival_pending:
             self.publish_arrival()
 
@@ -61,6 +64,9 @@ class FablabWaypointBridge(Node):
             self.get_logger().warning(f'MQTT broker connection lost (rc={result_code}); reconnecting')
 
     def on_message(self, _client, _userdata, message):
+        if message.topic == MQTT_TOPICS['drive_mode']:
+            self.handle_drive_mode(message.payload)
+            return
         try:
             decoded = json.loads(message.payload.decode('utf-8'))
         except (UnicodeDecodeError, json.JSONDecodeError):
@@ -90,6 +96,14 @@ class FablabWaypointBridge(Node):
             self.get_logger().info(
                 f'Published Fablab waypoint {index + 1}/{len(waypoints)}: '
                 f'({waypoint_x:.3f}, {waypoint_y:.3f})')
+
+    def handle_drive_mode(self, payload):
+        text = payload.decode('utf-8', errors='replace').strip()
+        if text not in ('1', '2'):
+            self.get_logger().warning(f'robot/drive_mode must be 1 or 2, got {text!r}')
+            return
+        self.drive_mode_publisher.publish(Int32(data=int(text)))
+        self.get_logger().info(f'Drive mode {text} requested from MQTT')
 
     def arrival_callback(self, message):
         if not message.data:
