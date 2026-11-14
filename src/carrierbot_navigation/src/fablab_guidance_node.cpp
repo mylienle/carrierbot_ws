@@ -687,6 +687,10 @@ private:
         if (remaining_distance_ <= corner_slowdown_distance_) {
           linear_x_ = std::min(linear_x_, corner_max_speed_);
         }
+      } else if (std::abs(heading_error_) <= 0.1 && current_segment_ + 1 > avoid_end_segment_) {
+        // Straight-through route waypoint (not a detour point around an obstacle): keep cruising
+        // instead of the per-segment slowdown to the minimum speed and the re-acceleration after it
+        linear_x_ = clamp(linear_speed_, min_linear_speed_, max_linear_speed_);
       }
     } else {
       reach_radius = final_goal_radius_;
