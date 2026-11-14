@@ -14,6 +14,7 @@
 
 #include "geometry_msgs/msg/pose_stamped.hpp"
 #include "geometry_msgs/msg/pose_with_covariance_stamped.hpp"
+#include "geometry_msgs/msg/transform_stamped.hpp"
 #include "geometry_msgs/msg/twist.hpp"
 #include "nav_msgs/msg/occupancy_grid.hpp"
 #include "obstacle_avoidance.hpp"
@@ -32,6 +33,27 @@ constexpr double kAvoidReleaseMargin = 0.3;
 constexpr int kAvoidReleaseCycles = 10;
 // Largest move of the obstacle centre between cycles still counted as the same estimate (m)
 constexpr double kAvoidCenterJump = 0.25;
+// Pose integrity (updatePose): data older than these stops the robot (s). AMCL republishes
+// map->odom on every scan, future-dated by its transform_tolerance.
+constexpr double kOdomTimeout = 0.5;
+constexpr double kLocalizationTimeout = 1.5;
+constexpr double kScanTimeout = 0.5;
+// Largest odom->base_footprint change per second the robot can really make (controller limits are
+// 1.0 m/s and 1.5 rad/s), plus a per-cycle slack. Faster changes are odometry glitches.
+constexpr double kMaxSpeed = 1.2;
+constexpr double kMaxYawRate = 2.0;
+constexpr double kPoseSlack = 0.05;
+constexpr double kYawSlack = 0.05;
+// Largest map->odom (AMCL) correction between two cycles accepted while driving
+constexpr double kCorrectionJump = 0.3;
+constexpr double kCorrectionYawJump = 0.25;
+// Consistent cycles needed after a fault before driving again (1.5 s at 10 Hz)
+constexpr int kPoseSettleCycles = 15;
+
+double yawOf(const geometry_msgs::msg::Quaternion & q)
+{
+  return std::atan2(2.0 * (q.w * q.z + q.x * q.y), 1.0 - 2.0 * (q.y * q.y + q.z * q.z));
+}
 
 double normalizeAngle(double angle)
 {
@@ -186,7 +208,7 @@ public:
         "time_s,segment,amcl_x,amcl_y,amcl_yaw,start_x,start_y,goal_x,goal_y,"
         "cross_track,long_track,lookahead,target_heading,heading_error,remaining_distance,"
         "linear_cmd,angular_cmd,safety_stop,finished,"
-        "avoid_state,obstacle_x,obstacle_y,obstacle_r,obstacle_distance\n";
+        "avoid_state,obstacle_x,obstacle_y,obstacle_r,obstacle_distance,pose_hold\n";
       RCLCPP_INFO(get_logger(), "Guidance CSV: %s", guidance_log_path_.c_str());
     } else {
       RCLCPP_WARN(get_logger(), "Cannot open guidance CSV: %s", guidance_log_path_.c_str());
@@ -279,6 +301,8 @@ private:
 
   void scanCallback(const sensor_msgs::msg::LaserScan::SharedPtr message)
   {
+    last_scan_time_ = get_clock()->now();
+    scan_received_ = true;
     if (avoidance_enabled_) {
       storeScanPoints(*message);
     }
@@ -666,27 +690,121 @@ private:
     }
   }
 
+  // Pose for this cycle: map->odom (AMCL) composed with odom->base_footprint (EKF), each checked
+  // first, so missing, stale or jumping data stops the robot instead of steering it. On B1 the odom
+  // yaw flipped 0.4 rad every cycle after the turn at the stairs and AMCL then jumped 77 deg: the
+  // robot over-turned off the lane, projected the walls into free space as obstacles and stopped
+  // for good. Returns false while the robot must hold still.
+  bool updatePose()
+  {
+    const rclcpp::Time now = get_clock()->now();
+    const char * fault = nullptr;
+    geometry_msgs::msg::TransformStamped map_odom;
+    geometry_msgs::msg::TransformStamped odom_base;
+    try {
+      map_odom = tf_buffer_->lookupTransform("map", "odom", tf2::TimePointZero);
+      odom_base = tf_buffer_->lookupTransform("odom", "base_footprint", tf2::TimePointZero);
+    } catch (const tf2::TransformException &) {
+      fault = "no map->odom->base_footprint TF";
+    }
+    if (!fault && (now - rclcpp::Time(odom_base.header.stamp)).seconds() > kOdomTimeout) {
+      fault = "odometry (EKF) stale";
+    } else if (!fault && (now - rclcpp::Time(map_odom.header.stamp)).seconds() > kLocalizationTimeout) {
+      fault = "AMCL map->odom stale";
+    } else if (!fault && scan_subscription_ &&
+      (!scan_received_ || (now - last_scan_time_).seconds() > kScanTimeout))
+    {
+      fault = "no lidar scan";
+    } else if (!fault && avoidance_enabled_ && !map_) {
+      fault = "no /map for avoidance";
+    }
+    if (!fault) {
+      const double odom_x = odom_base.transform.translation.x;
+      const double odom_y = odom_base.transform.translation.y;
+      const double odom_yaw = yawOf(odom_base.transform.rotation);
+      const double correction_x = map_odom.transform.translation.x;
+      const double correction_y = map_odom.transform.translation.y;
+      const double correction_yaw = yawOf(map_odom.transform.rotation);
+      if (has_last_tf_) {
+        const double dt = std::max((now - last_pose_check_time_).seconds(), cycle_seconds_);
+        if (std::hypot(odom_x - last_odom_x_, odom_y - last_odom_y_) > kMaxSpeed * dt + kPoseSlack ||
+          std::abs(normalizeAngle(odom_yaw - last_odom_yaw_)) > kMaxYawRate * dt + kYawSlack)
+        {
+          fault = "odometry jumped (two odom->base_footprint publishers?)";
+        } else if (
+          std::hypot(correction_x - last_correction_x_, correction_y - last_correction_y_) >
+          kCorrectionJump ||
+          std::abs(normalizeAngle(correction_yaw - last_correction_yaw_)) > kCorrectionYawJump)
+        {
+          fault = "AMCL pose jumped";
+        }
+      }
+      has_last_tf_ = true;
+      last_pose_check_time_ = now;
+      last_odom_x_ = odom_x;
+      last_odom_y_ = odom_y;
+      last_odom_yaw_ = odom_yaw;
+      last_correction_x_ = correction_x;
+      last_correction_y_ = correction_y;
+      last_correction_yaw_ = correction_yaw;
+      // Always take the newest pose, so driving resumes from it once it has settled
+      x_ = correction_x + std::cos(correction_yaw) * odom_x - std::sin(correction_yaw) * odom_y;
+      y_ = correction_y + std::sin(correction_yaw) * odom_x + std::cos(correction_yaw) * odom_y;
+      theta_ = normalizeAngle(correction_yaw + odom_yaw);
+    }
+
+    if (fault) {
+      RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 1000, "Holding still: %s", fault);
+      pose_hold_cycles_ = kPoseSettleCycles;
+      return false;
+    }
+    if (pose_hold_cycles_ > 0 && --pose_hold_cycles_ > 0) {
+      return false;
+    }
+    if (pose_was_held_) {
+      resumeAfterPoseHold();
+    }
+    return true;
+  }
+
+  // Driving again after a pose fault: the heading may now differ a lot, so turn in place towards
+  // the goal first (start alignment) instead of swinging through it at speed, and drop any stop
+  // latched on obstacles that were walls projected with the bad pose
+  void resumeAfterPoseHold()
+  {
+    pose_was_held_ = false;
+    RCLCPP_INFO(get_logger(), "Pose consistent again; resuming");
+    if (!finished_ && current_segment_ + 1 < waypoints_.size()) {
+      start_alignment_pending_ = true;
+      start_alignment_active_ = false;
+    }
+    avoid_latched_ = false;
+    avoid_release_count_ = 0;
+    avoid_confirm_count_ = 0;
+    filtered_derivative_ = 0.0;
+    integral_ = 0.0;
+  }
+
   void controlCallback()
   {
     if (!has_pose_) {
       cmd_publisher_->publish(geometry_msgs::msg::Twist());
       return;
     }
-    // /amcl_pose only updates ~2.5 Hz and jumps; use map->base_footprint TF
-    // (AMCL + odometry) every cycle for a smooth pose, keep /amcl_pose if TF fails
-    try {
-      const auto transform = tf_buffer_->lookupTransform("map", "base_footprint", tf2::TimePointZero);
-      x_ = transform.transform.translation.x;
-      y_ = transform.transform.translation.y;
-      const auto & q = transform.transform.rotation;
-      theta_ = std::atan2(2.0 * (q.w * q.z + q.x * q.y), 1.0 - 2.0 * (q.y * q.y + q.z * q.z));
-    } catch (const tf2::TransformException &) {
+    const bool pose_ok = updatePose();
+    if (pose_ok) {
+      updateAvoidance();
+      updateRoute();
+    } else {
+      pose_was_held_ = true;
+      linear_x_ = 0.0;
+      angular_z_ = 0.0;
+      avoid_stop_ = false;
+      obstacle_ = fablab_avoidance::Obstacle();
     }
-    updateAvoidance();
-    updateRoute();
 
     geometry_msgs::msg::Twist command;
-    if (!finished_ && !safety_stop_ && !avoid_stop_) {
+    if (pose_ok && !finished_ && !safety_stop_ && !avoid_stop_) {
       // Driver wheel limit is 0.9 m/s: keep v + |w|*L/2 below it so turning is not clipped,
       // and v >= |w|*L/2 so the inner wheel never reverses (jerk at corners)
       const double half_turn = std::abs(angular_z_) * 0.57 / 2.0;
@@ -718,7 +836,8 @@ private:
                   << (avoid_stop_ ? 2 : (current_segment_ + 1 < avoid_end_segment_ ? 1 : 0)) << ','
                   << (obstacle_.found ? obstacle_.center.x : 0.0) << ','
                   << (obstacle_.found ? obstacle_.center.y : 0.0) << ','
-                  << obstacle_.radius << ',' << obstacle_.surface_distance << '\n';
+                  << obstacle_.radius << ',' << obstacle_.surface_distance << ','
+                  << (pose_was_held_ ? 1 : 0) << '\n';
     guidance_log_.flush();
   }
 
@@ -771,6 +890,18 @@ private:
   std::vector<bool> scan_point_is_new_;
   nav_msgs::msg::OccupancyGrid::SharedPtr map_;
   double last_linear_cmd_{0.0};
+  rclcpp::Time last_scan_time_{0, 0, RCL_ROS_TIME};
+  bool scan_received_{false};
+  bool has_last_tf_{false};
+  rclcpp::Time last_pose_check_time_{0, 0, RCL_ROS_TIME};
+  double last_odom_x_{0.0};
+  double last_odom_y_{0.0};
+  double last_odom_yaw_{0.0};
+  double last_correction_x_{0.0};
+  double last_correction_y_{0.0};
+  double last_correction_yaw_{0.0};
+  int pose_hold_cycles_{0};
+  bool pose_was_held_{false};
   bool has_pose_{false};
   bool finished_{false};
   bool start_alignment_pending_{false};
