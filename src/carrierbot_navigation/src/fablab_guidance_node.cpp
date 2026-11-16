@@ -59,6 +59,9 @@ constexpr int kDriveModeAuto = 2;
 // The bridge publishes a whole route within milliseconds; a waypoint arriving later than this
 // after the previous one is a new mission and replaces the unfinished route
 constexpr double kNewMissionGap = 1.0;
+// Every GUI route starts with the robot pose (rounded to mm). Seeing that first point again within
+// the same burst means a second route list arrived (the goal was planned twice) and is not a stop.
+constexpr double kRepeatedRouteStartTolerance = 0.01;
 
 double yawOf(const geometry_msgs::msg::Quaternion & q)
 {
@@ -262,12 +265,18 @@ private:
     const bool new_burst = last_waypoint_time_.nanoseconds() != 0 &&
       (now - last_waypoint_time_).seconds() > kNewMissionGap;
     last_waypoint_time_ = now;
-    if ((arrival_published_ || new_burst) &&
-      (!waypoints_.empty() || !pending_waypoints_.empty()))
-    {
+    const double waypoint_x = message->pose.position.x;
+    const double waypoint_y = message->pose.position.y;
+    const bool has_route = !waypoints_.empty() || !pending_waypoints_.empty();
+    // A second list appended to the first sent the robot from the destination back to the route
+    // start (16/11: turned left at Stair, drove into the wall after WI)
+    const bool repeated_start = has_route && !new_burst && !arrival_published_ &&
+      std::hypot(waypoint_x - route_first_x_, waypoint_y - route_first_y_) <
+      kRepeatedRouteStartTolerance;
+    if ((arrival_published_ || new_burst || repeated_start) && has_route) {
       RCLCPP_WARN(
         get_logger(), "New mission received; replacing the %s Fablab route",
-        arrival_published_ ? "completed" : "unfinished");
+        repeated_start ? "just received" : (arrival_published_ ? "completed" : "unfinished"));
       waypoints_.clear();
       pending_waypoints_.clear();
       current_segment_ = 0;
@@ -275,9 +284,11 @@ private:
       finished_ = false;
       resetAvoidance();
     }
+    if (waypoints_.empty() && pending_waypoints_.empty()) {
+      route_first_x_ = waypoint_x;
+      route_first_y_ = waypoint_y;
+    }
 
-    const double waypoint_x = message->pose.position.x;
-    const double waypoint_y = message->pose.position.y;
     if (!has_pose_) {
       pending_waypoints_.emplace_back(waypoint_x, waypoint_y);
       RCLCPP_WARN(
@@ -1016,6 +1027,8 @@ private:
   bool manual_active_{false};
   bool manual_resume_pending_{false};
   rclcpp::Time last_waypoint_time_{0, 0, RCL_ROS_TIME};
+  double route_first_x_{0.0};
+  double route_first_y_{0.0};
   bool has_pose_{false};
   bool finished_{false};
   bool start_alignment_pending_{false};
