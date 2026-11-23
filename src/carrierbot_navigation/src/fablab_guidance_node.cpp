@@ -186,6 +186,9 @@ public:
     smooth_params_.w_length = declare_parameter<double>("smooth_w_length", 1.0);
     smooth_params_.w_turn = declare_parameter<double>("smooth_w_turn", 20.0);
     smooth_params_.w_side_switch = declare_parameter<double>("smooth_w_side_switch", 1.0);
+    // The LiDAR sees only the near faces: the obstacle is assumed this deep behind them. A longer
+    // obstacle shows up while the detour is followed, and the detour is then planned again (m)
+    smooth_params_.shadow_depth = declare_parameter<double>("smooth_shadow_depth", 0.5);
     // Speed on a smooth detour: v = sqrt(a_lat * leg / turn) at the next detour waypoint, so the
     // robot keeps a steady speed through gentle bends instead of dropping to min_speed_linear at
     // every inserted point (m/s^2)
@@ -197,7 +200,7 @@ public:
       smooth_params_.waypoint_spacing <= goal_radius_ ||
       smooth_params_.max_turn <= 0.0 || smooth_params_.hard_turn < smooth_params_.max_turn ||
       smooth_params_.ramp_min <= 0.0 || smooth_params_.ramp_max < smooth_params_.ramp_min ||
-      smooth_lateral_accel_ <= 0.0)
+      smooth_params_.shadow_depth < 0.0 || smooth_lateral_accel_ <= 0.0)
     {
       throw std::runtime_error("Invalid smooth avoidance parameters");
     }
@@ -547,18 +550,18 @@ private:
       avoid_release_count_ = 0;
       avoid_confirm_count_ = 0;
     }
-    if (!obstacle_.found || obstacle_.surface_distance >= avoid_params_.avoid_distance) {
-      avoid_confirm_count_ = 0;
-      return;
-    }
-    if (obstacle_.surface_distance <= brake_distance) {
+    if (obstacle_.found && obstacle_.surface_distance <= brake_distance) {
       avoid_stop_ = true;
       avoid_latched_ = true;
       avoid_release_count_ = 0;
       return;
     }
     if (current_segment_ + 1 < avoid_end_segment_) {
-      // Already following a detour: leave it to the stopping monitor
+      updateDetour(robot, is_ahead);
+      return;
+    }
+    if (!obstacle_.found || obstacle_.surface_distance >= avoid_params_.avoid_distance) {
+      avoid_confirm_count_ = 0;
       return;
     }
     // Plan only on an estimate that has settled: close to the obstacle the nearest point can
@@ -572,25 +575,69 @@ private:
     if (++avoid_confirm_count_ < avoid_confirm_cycles_) {
       return;
     }
+    detour_line_start_ = start;
+    planDetour(robot, is_ahead, false);
+  }
+
+  // While a detour is followed, a part of the obstacle that was hidden when it was planned (a
+  // long plank seen end-on, a box deeper than assumed) can show up on the rest of the detour.
+  // The detour is then planned again from the robot around everything seen so far, on the line
+  // of the original segment. The braking check in updateAvoidance still covers the active leg.
+  void updateDetour(const fablab_avoidance::Point & robot, const std::vector<bool> & is_ahead)
+  {
+    std::vector<fablab_avoidance::Point> legs;
+    for (std::size_t i = current_segment_ + 1; i <= avoid_end_segment_ && i < waypoints_.size(); ++i) {
+      legs.push_back({waypoints_[i].first, waypoints_[i].second});
+    }
+    const std::size_t hit = fablab_avoidance::blockingPoint(
+      scan_points_, is_ahead, robot, legs, avoid_params_.robot_radius + avoid_params_.clearance,
+      avoid_params_.avoid_distance);
+    if (hit >= scan_points_.size()) {
+      avoid_confirm_count_ = 0;
+      return;
+    }
+    if (++avoid_confirm_count_ < avoid_confirm_cycles_) {
+      return;
+    }
+    obstacle_ = fablab_avoidance::clusterAround(scan_points_, is_ahead, hit, robot, avoid_params_);
+    planDetour(robot, is_ahead, true);
+  }
+
+  // Plans a detour around obstacle_ on the line detour_line_start_ -> segment goal and inserts it
+  // after the active segment start. A re-plan first drops the rest of the current detour.
+  void planDetour(
+    const fablab_avoidance::Point & robot, const std::vector<bool> & is_ahead, bool replan)
+  {
+    const std::size_t goal_index = replan ? avoid_end_segment_ : current_segment_ + 1;
+    const fablab_avoidance::Point goal{waypoints_[goal_index].first, waypoints_[goal_index].second};
     // The scan can miss a wall the legs pass (occluded, or a poor return at a distance), so the
     // legs are also checked against the occupied cells of the static map around the robot
     std::vector<fablab_avoidance::Point> points = scan_points_;
     appendMapWalls(robot, points);
+    std::vector<bool> is_obstacle = is_ahead;
+    is_obstacle.resize(points.size(), false);
     const auto plan_start = std::chrono::steady_clock::now();
     const auto plan = fablab_avoidance::planSmoothAvoidance(
-      obstacle_, points, robot, start, goal, last_avoid_side_, avoid_params_, smooth_params_);
+      obstacle_, points, is_obstacle, robot, detour_line_start_, goal, last_avoid_side_,
+      avoid_params_, smooth_params_);
     const double plan_ms = std::chrono::duration<double, std::milli>(
       std::chrono::steady_clock::now() - plan_start).count();
     const auto & inserted = plan.route;
     if (inserted.empty()) {
-      // No detour fits from here (e.g. the robot is still inside a narrow passage). The obstacle is
-      // beyond d_brake, so keep following the original path and plan again next cycle; the
-      // braking check above stops the robot if no detour is found before d_brake.
+      // No detour fits from here (e.g. the robot is still inside a narrow passage). Keep the
+      // current path and plan again next cycle; the braking check in updateAvoidance stops the
+      // robot if nothing is found before d_brake.
       RCLCPP_WARN_THROTTLE(
         get_logger(), *get_clock(), 1000,
-        "No smooth detour around obstacle at (%.2f, %.2f) d=%.2f m (%.1f ms), keeping the path",
-        obstacle_.center.x, obstacle_.center.y, obstacle_.surface_distance, plan_ms);
+        "No smooth detour around obstacle at (%.2f, %.2f) d=%.2f m (%.1f ms), keeping the %s",
+        obstacle_.center.x, obstacle_.center.y, obstacle_.surface_distance, plan_ms,
+        replan ? "current detour" : "path");
       return;
+    }
+    if (replan) {
+      waypoints_.erase(
+        waypoints_.begin() + static_cast<std::ptrdiff_t>(current_segment_ + 1),
+        waypoints_.begin() + static_cast<std::ptrdiff_t>(avoid_end_segment_));
     }
     const auto position = waypoints_.begin() + static_cast<std::ptrdiff_t>(current_segment_ + 1);
     std::vector<std::pair<double, double>> detour;
@@ -605,8 +652,9 @@ private:
     last_avoid_side_ = plan.side;
     RCLCPP_WARN(
       get_logger(),
-      "Avoiding obstacle at (%.2f, %.2f) r=%.2f m, d=%.2f m: side=%+d cost=%.2f kmax=%.2f 1/m "
+      "%s obstacle at (%.2f, %.2f) r=%.2f m, d=%.2f m: side=%+d cost=%.2f kmax=%.2f 1/m "
       "valid=%d points=%zu first=(%.2f, %.2f) %.1f ms",
+      replan ? "Re-planned detour around" : "Avoiding",
       obstacle_.center.x, obstacle_.center.y, obstacle_.radius, obstacle_.surface_distance,
       plan.side, plan.cost, plan.max_curvature, plan.valid_candidates, inserted.size() - 1,
       inserted[1].x, inserted[1].y, plan_ms);
@@ -1065,6 +1113,7 @@ private:
   fablab_avoidance::SmoothParams smooth_params_;
   double smooth_lateral_accel_{0.2};
   int detour_side_{0};          // side of the active detour, +1 left, -1 right
+  fablab_avoidance::Point detour_line_start_;  // start of the segment the detour replaces
   int last_avoid_side_{-1};     // side of the previous detour, preferred by the smooth planner
   int avoid_confirm_cycles_{3};
   int avoid_confirm_count_{0};

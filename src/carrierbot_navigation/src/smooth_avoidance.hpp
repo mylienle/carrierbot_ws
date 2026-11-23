@@ -1,10 +1,10 @@
 // Smooth sampling-based detour planner of the fablab guidance (obstacle_avoidance.hpp detects the
-// obstacle). Candidates are smooth lateral-offset curves around the obstacle, scored by a cost that
-// weighs curvature first, then clearance and extra length; each side is refined with the
-// MPPI-style exponentially weighted average of its candidates and the cheaper refined side wins.
-// The curve is handed to the
-// unchanged LOS + PD tracker as a few evenly spaced waypoints. Kept free of ROS so it can be
-// unit tested on its own.
+// obstacle). The obstacle is its scanned points plus an assumed depth behind them, not a circle.
+// Candidates are smooth lateral-offset curves around it, scored by a cost that weighs curvature
+// first, then clearance and extra length; each side is refined with the MPPI-style exponentially
+// weighted average of its candidates and the cheaper refined side wins. The curve is handed to the
+// unchanged LOS + PD tracker as a few evenly spaced waypoints. Kept free of ROS so it can be unit
+// tested on its own.
 #pragma once
 
 #include <algorithm>
@@ -24,14 +24,15 @@ namespace fablab_avoidance
 struct SmoothParams
 {
   int samples{48};              // random candidates per side in the first round
-  int refine_samples{24};       // candidates drawn around the weighted mean of the winning side
+  int refine_samples{24};       // candidates drawn around the weighted mean of each side
   double temperature{1.0};      // lambda of the MPPI weights exp(-(J - J_min) / lambda)
   double waypoint_spacing{1.0};  // arc length between inserted waypoints (m), > switch_radius
   double max_turn{0.35};        // heading change at a waypoint that is free of turn cost (rad)
   double hard_turn{0.7};        // larger heading changes at a waypoint reject the candidate (rad)
   double ramp_min{1.5};         // shortest ramp from the path to the full offset and back (m)
   double ramp_max{4.0};         // longest ramp (m)
-  double hold_extra{1.5};       // the full-offset leg spans at most r_safe + this past the centre (m)
+  double hold_extra{1.5};       // the full-offset leg spans at most the margin + this past the obstacle (m)
+  double shadow_depth{0.5};     // the unseen obstacle is assumed this deep behind its visible points (m)
   double clearance_decay{0.3};  // c0 of the clearance cost exp(-c / c0) (m)
   double w_curvature{4.0};      // integral of curvature^2 along the curve
   double w_peak_curvature{2.0};  // peak curvature^2
@@ -183,8 +184,9 @@ private:
   std::vector<double> distance_;
 };
 
-// One candidate: pass on side, at lateral offset (from the obstacle centre), keeping the full
-// offset for hold either side of the centre, with ramps ramp_in / ramp_out
+// One candidate: pass on side, at lateral offset beyond that side of the obstacle, keeping the
+// full offset from hold before the obstacle's first point to hold past its last one (hold < 0
+// lets the ramps overlap the obstacle ends), with ramps ramp_in / ramp_out
 struct Candidate
 {
   int side{1};
@@ -204,11 +206,52 @@ struct Evaluation
 
 }  // namespace smooth_detail
 
+// Index of the nearest new point within band of the legs robot -> legs[0] -> legs[1] ... and
+// closer than reach to the robot, or points.size() when the legs are clear. Used while a detour
+// is followed: a part of the obstacle that was hidden when the detour was planned shows up here.
+inline std::size_t blockingPoint(
+  const std::vector<Point> & points, const std::vector<bool> & is_new, const Point & robot,
+  const std::vector<Point> & legs, double band, double reach)
+{
+  std::size_t nearest = points.size();
+  double nearest_distance = reach;
+  for (std::size_t i = 0; i < points.size(); ++i) {
+    if (!is_new[i]) {
+      continue;
+    }
+    const double d = distance(points[i], robot);
+    if (d >= nearest_distance) {
+      continue;
+    }
+    Point a = robot;
+    for (const auto & b : legs) {
+      const double vx = b.x - a.x;
+      const double vy = b.y - a.y;
+      const double length2 = vx * vx + vy * vy;
+      double t = length2 > 1e-12 ? ((points[i].x - a.x) * vx + (points[i].y - a.y) * vy) / length2 : 0.0;
+      t = std::max(0.0, std::min(t, 1.0));
+      if (distance(points[i], {a.x + t * vx, a.y + t * vy}) < band) {
+        nearest = i;
+        nearest_distance = d;
+        break;
+      }
+      a = b;
+    }
+  }
+  return nearest;
+}
+
 // Plans the detour for the obstacle that blocks start -> goal. points are all scan points and
-// static map walls near the robot (map frame). preferred_side is the side of the previous detour
-// (or the configured default); passing on the other side costs w_side_switch.
+// static map walls near the robot (map frame); is_obstacle marks the new scan points ahead of the
+// robot. The obstacle is its cluster points as seen, extended by shadow_depth along the path
+// behind them (the LiDAR only sees the near faces); the detour keeps r_robot + c_clear + 0.1 from
+// those and from every other new point ahead, and r_robot + wall_margin from the rest.
+// robot may be off the start -> goal line (a re-plan while a detour is followed).
+// preferred_side is the side of the previous detour (or the configured default); passing on the
+// other side costs w_side_switch.
 inline SmoothPlan planSmoothAvoidance(
   const Obstacle & obstacle, const std::vector<Point> & points,
+  const std::vector<bool> & is_obstacle,
   const Point & robot, const Point & start, const Point & goal, int preferred_side,
   const Params & params, const SmoothParams & smooth)
 {
@@ -216,7 +259,7 @@ inline SmoothPlan planSmoothAvoidance(
   using smooth_detail::Evaluation;
   SmoothPlan plan;
   const double segment_length = distance(start, goal);
-  if (!obstacle.found || segment_length < 1e-6) {
+  if (!obstacle.found || segment_length < 1e-6 || is_obstacle.size() != points.size()) {
     return plan;
   }
   smooth_detail::Frame frame;
@@ -225,22 +268,55 @@ inline SmoothPlan planSmoothAvoidance(
   frame.uy = (goal.y - start.y) / segment_length;
   frame.length = segment_length;
 
-  const double r_safe = obstacle.radius + params.robot_radius + params.clearance;
-  // Small extra margin so scan noise on the circle edge does not re-trigger detection
-  const double required = r_safe + 0.1;
+  // Split the points: obstacle points (new, ahead, plus the shadow of the cluster) and the rest
+  std::vector<Point> obstacle_points;
+  std::vector<Point> other_points;
+  double first_s = std::numeric_limits<double>::infinity();
+  double last_s = -first_s;
+  double right_d = first_s;
+  double left_d = -first_s;
+  for (std::size_t i = 0; i < points.size(); ++i) {
+    const bool member = i < obstacle.member.size() && obstacle.member[i];
+    if (!is_obstacle[i] && !member) {
+      other_points.push_back(points[i]);
+      continue;
+    }
+    obstacle_points.push_back(points[i]);
+    if (!member) {
+      continue;
+    }
+    const double s = frame.along(points[i]);
+    const double d = frame.lateral(points[i]);
+    for (double depth = smooth.grid_resolution; depth <= smooth.shadow_depth + 1e-9;
+      depth += smooth.grid_resolution)
+    {
+      obstacle_points.push_back(frame.at(s + depth, d));
+    }
+    first_s = std::min(first_s, s);
+    last_s = std::max(last_s, s + std::max(0.0, smooth.shadow_depth));
+    right_d = std::min(right_d, d);
+    left_d = std::max(left_d, d);
+  }
+  if (first_s > last_s) {
+    return plan;
+  }
+
+  // Small extra margin so scan noise on the obstacle edge does not re-trigger detection
+  const double required = params.robot_radius + params.clearance + 0.1;
   const double robot_s = frame.along(robot);
   const double robot_d = frame.lateral(robot);
-  const double center_s = frame.along(obstacle.center);
-  const double center_d = frame.lateral(obstacle.center);
-  const double hold_max = r_safe + smooth.hold_extra;
+  const double hold_min = -required;
+  const double hold_max = required + smooth.hold_extra;
 
   const double cap = smooth.distance_cap;
   const double s_lo = robot_s - cap - 0.5;
-  const double s_hi = std::min(segment_length, center_s + hold_max + smooth.ramp_max) + 2.0 + cap;
-  const double d_extent =
-    std::max(std::abs(robot_d), std::abs(center_d) + params.max_lateral) + cap + 0.5;
-  const smooth_detail::DistanceGrid grid(
-    frame, s_lo, s_hi, -d_extent, d_extent, smooth.grid_resolution, cap, points);
+  const double s_hi = std::min(segment_length, last_s + hold_max + smooth.ramp_max) + 2.0 + cap;
+  const double d_extent = std::max(
+    std::abs(robot_d), std::max(std::abs(left_d), std::abs(right_d)) + params.max_lateral) + cap + 0.5;
+  const smooth_detail::DistanceGrid obstacle_grid(
+    frame, s_lo, s_hi, -d_extent, d_extent, smooth.grid_resolution, cap, obstacle_points);
+  const smooth_detail::DistanceGrid other_grid(
+    frame, s_lo, s_hi, -d_extent, d_extent, smooth.grid_resolution, cap, other_points);
 
   const double sample_step = smooth.grid_resolution;
   // Clearance cost and hard checks along one straight leg the LOS tracker follows
@@ -254,12 +330,13 @@ inline SmoothPlan planSmoothAvoidance(
         if (frame.along(p) > s_hi - cap) {
           break;
         }
-        const double circle = distance(p, obstacle.center) - required;
-        const double body = grid.clearance(p) - params.robot_radius - params.wall_margin;
-        if (circle < 0.0 || body < 0.0) {
+        const double to_obstacle = obstacle_grid.clearance(p);
+        const double to_other = other_grid.clearance(p);
+        if (to_obstacle < required || to_other < params.robot_radius + params.wall_margin) {
           return false;
         }
-        const double c = std::min(distance(p, obstacle.center) - r_safe, grid.clearance(p) - params.robot_radius);
+        const double c = std::min(
+          to_obstacle - params.robot_radius - params.clearance, to_other - params.robot_radius);
         clearance_cost += std::exp(-std::max(c, 0.0) / smooth.clearance_decay) * (length / n);
       }
       return true;
@@ -267,18 +344,22 @@ inline SmoothPlan planSmoothAvoidance(
 
   auto evaluate = [&](const Candidate & c) {
       Evaluation e;
-      const double target_d = center_d + c.side * c.offset;
-      if (std::abs(target_d) > std::abs(center_d) + params.max_lateral + 1e-9) {
+      const double target_d = c.side > 0 ? left_d + c.offset : right_d - c.offset;
+      if (c.offset > params.max_lateral + 1e-9) {
         return e;
       }
-      const double hold_start = center_s - c.hold;
-      const double hold_end = center_s + c.hold;
-      // The ramp in starts at the robot at the latest; too little room makes the turn too sharp
+      double hold_start = first_s - c.hold;
+      const double hold_end = std::max(hold_start, last_s + c.hold);
+      // The ramp in starts at the robot at the latest. With the robot already close to (or beside)
+      // the obstacle, the full offset is reached after the shortest ramp instead
       const double in_start = std::max(robot_s, hold_start - c.ramp_in);
-      const double ramp_in = hold_start - in_start;
-      if (ramp_in < smooth.ramp_min * 0.5) {
-        return e;
+      if (hold_start - in_start < smooth.ramp_min * 0.5) {
+        hold_start = in_start + smooth.ramp_min * 0.5;
+        if (hold_start > hold_end) {
+          return e;
+        }
       }
+      const double ramp_in = hold_start - in_start;
       // Rejoin before the segment goal; when it does not fit the curve ends at the goal itself
       double out_end = hold_end + c.ramp_out;
       const bool ends_at_goal = out_end >= segment_length - 1e-6;
@@ -420,7 +501,7 @@ inline SmoothPlan planSmoothAvoidance(
   }
   auto clip = [&](Candidate c) {
       c.offset = std::max(required, std::min(c.offset, offset_max));
-      c.hold = std::max(0.0, std::min(c.hold, hold_max));
+      c.hold = std::max(hold_min, std::min(c.hold, hold_max));
       c.ramp_in = std::max(smooth.ramp_min, std::min(c.ramp_in, smooth.ramp_max));
       c.ramp_out = std::max(smooth.ramp_min, std::min(c.ramp_out, smooth.ramp_max));
       return c;
@@ -441,7 +522,7 @@ inline SmoothPlan planSmoothAvoidance(
       // Favour small offsets: the square pulls most samples towards the required clearance
       const double u = unit(random);
       c.offset = required + u * u * (offset_max - required);
-      c.hold = unit(random) * hold_max;
+      c.hold = hold_min + unit(random) * (hold_max - hold_min);
       c.ramp_in = smooth.ramp_min + unit(random) * (smooth.ramp_max - smooth.ramp_min);
       c.ramp_out = smooth.ramp_min + unit(random) * (smooth.ramp_max - smooth.ramp_min);
       Evaluation e = evaluate(c);

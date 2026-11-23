@@ -28,7 +28,7 @@ struct Params
   // beside the static object near WI on B1, so the robot braked instead of avoiding.
   double wall_margin{0.08};
   double cluster_gap{0.15};      // neighbouring scan points closer than this belong to one obstacle
-  double max_lateral{2.5};       // largest lateral offset of a detour from the obstacle centre
+  double max_lateral{2.5};       // largest lateral offset of a detour beyond the obstacle's side
   double switch_radius{0.5};     // the guidance switches segment this far before a waypoint
 };
 
@@ -54,12 +54,16 @@ inline double brakeDistance(double speed, const Params & params)
          v * v / (2.0 * params.brake_decel);
 }
 
+inline Obstacle clusterAround(
+  const std::vector<Point> & points, const std::vector<bool> & is_new, std::size_t seed,
+  const Point & robot, const Params & params);
+
 // Nearest new obstacle that blocks the active segment ahead of the robot. A scan point blocks
 // the segment when its lateral offset is smaller than r_robot + c_clear and it lies between
 // the robot and the segment goal (walls behind a corner waypoint are not obstacles).
 // points are in the map frame and in scan order; is_new is false for points on the static map.
-// The LiDAR only sees the near face, so the obstacle is approximated by the circle centred
-// on the midpoint of the cluster ends that encloses every cluster point.
+// The LiDAR only sees the near face. center/radius summarise the cluster for logs and the
+// stopping check; the detour planner works on the cluster points themselves (member).
 inline Obstacle detectObstacle(
   const std::vector<Point> & points, const std::vector<bool> & is_new,
   const Point & robot, const Point & start, const Point & goal, const Params & params)
@@ -94,7 +98,17 @@ inline Obstacle detectObstacle(
   if (nearest == points.size()) {
     return obstacle;
   }
+  return clusterAround(points, is_new, nearest, robot, params);
+}
 
+// The obstacle formed by the scan points connected to points[seed] (seed must be a new point).
+inline Obstacle clusterAround(
+  const std::vector<Point> & points, const std::vector<bool> & is_new, std::size_t seed,
+  const Point & robot, const Params & params)
+{
+  Obstacle obstacle;
+  const std::size_t nearest = seed;
+  const double nearest_distance = std::max(distance(points[nearest], robot), 1e-6);
   // Grow the cluster both ways in scan order. The scan is a full turn and the LiDAR is mounted
   // backwards, so straight ahead is where the scan wraps: neighbours are taken modulo n.
   const std::size_t n = points.size();
