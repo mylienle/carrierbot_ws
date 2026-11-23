@@ -29,15 +29,18 @@ struct SmoothParams
   double waypoint_spacing{1.0};  // arc length between inserted waypoints (m), > switch_radius
   double max_turn{0.35};        // heading change at a waypoint that is free of turn cost (rad)
   double hard_turn{0.7};        // larger heading changes at a waypoint reject the candidate (rad)
-  double ramp_min{1.5};         // shortest ramp from the path to the full offset and back (m)
-  double ramp_max{4.0};         // longest ramp (m)
-  double hold_extra{1.5};       // the full-offset leg spans at most the margin + this past the obstacle (m)
+  double ramp_min{1.0};         // shortest ramp from the path to the full offset and back (m)
+  double ramp_max{2.5};         // longest ramp (m), unless ramp_per_offset needs more
+  double ramp_per_offset{2.0};  // the longest ramp is at least this times the smaller needed offset
+  double hold_extra{0.5};       // the full-offset leg spans at most the margin + this past the obstacle (m)
+  double edge_margin{0.1};      // kept beyond r_robot + c_clear from the obstacle points (m)
   double shadow_depth{0.5};     // the unseen obstacle is assumed this deep behind its visible points (m)
   double clearance_decay{0.3};  // c0 of the clearance cost exp(-c / c0) (m)
   double w_curvature{4.0};      // integral of curvature^2 along the curve
   double w_peak_curvature{2.0};  // peak curvature^2
   double w_clearance{2.0};      // integral of exp(-c / c0) along the tracked legs
   double w_length{1.0};         // extra length over the straight path (m)
+  double w_deviation{2.0};      // integral of |lateral offset| along the path (m^2): rejoin early
   double w_turn{20.0};          // sum of (|turn| - max_turn)^2 over waypoints above max_turn
   double w_side_switch{1.0};    // passing on the other side than the previous detour
   double grid_resolution{0.05};  // local distance grid cell (m)
@@ -107,6 +110,25 @@ public:
     nd_ = std::max(1, static_cast<int>(std::ceil((d_max - d_min) / resolution)));
     source_.assign(static_cast<std::size_t>(ns_) * nd_, -1);
     distance_.assign(source_.size(), std::numeric_limits<double>::infinity());
+    // Points per cell (compressed rows) for the exact search
+    bucket_start_.assign(source_.size() + 1, 0);
+    for (const auto & point : points_) {
+      const int cell = cellOf(point);
+      if (cell >= 0) {
+        ++bucket_start_[static_cast<std::size_t>(cell) + 1];
+      }
+    }
+    for (std::size_t c = 0; c < source_.size(); ++c) {
+      bucket_start_[c + 1] += bucket_start_[c];
+    }
+    bucket_.assign(static_cast<std::size_t>(bucket_start_.back()), 0);
+    std::vector<int> fill(bucket_start_.begin(), bucket_start_.end() - 1);
+    for (std::size_t i = 0; i < points_.size(); ++i) {
+      const int cell = cellOf(points_[i]);
+      if (cell >= 0) {
+        bucket_[static_cast<std::size_t>(fill[static_cast<std::size_t>(cell)]++)] = static_cast<int>(i);
+      }
+    }
     std::queue<int> open;
     for (std::size_t i = 0; i < points_.size(); ++i) {
       const int cell = cellOf(points_[i]);
@@ -147,14 +169,31 @@ public:
     }
   }
 
-  // Distance from p to the nearest point, capped
-  double clearance(const Point & p) const
+  // Distance from p to the nearest point, capped. The propagated source of a cell is a real point,
+  // so its distance is an upper bound, but not always the nearest one (errors of ~0.01 m that were
+  // not symmetric left/right). Below exact_below the cells within that bound are searched for the
+  // exact nearest point, so the hard clearance checks do not depend on the grid
+  double clearance(const Point & p, double exact_below = 0.0) const
   {
     const int cell = cellOf(p);
     if (cell < 0 || source_[cell] < 0) {
       return cap_;
     }
-    return std::min(cap_, fablab_avoidance::distance(p, points_[static_cast<std::size_t>(source_[cell])]));
+    double best = fablab_avoidance::distance(p, points_[static_cast<std::size_t>(source_[cell])]);
+    if (best < exact_below) {
+      const int cs = cell / nd_;
+      const int cd = cell % nd_;
+      const int reach = static_cast<int>(std::ceil(best / resolution_)) + 1;
+      for (int s = std::max(0, cs - reach); s <= std::min(ns_ - 1, cs + reach); ++s) {
+        for (int d = std::max(0, cd - reach); d <= std::min(nd_ - 1, cd + reach); ++d) {
+          const int c = s * nd_ + d;
+          for (int k = bucket_start_[c]; k < bucket_start_[c + 1]; ++k) {
+            best = std::min(best, fablab_avoidance::distance(p, points_[static_cast<std::size_t>(bucket_[k])]));
+          }
+        }
+      }
+    }
+    return std::min(cap_, best);
   }
 
 private:
@@ -181,6 +220,8 @@ private:
   int ns_{1};
   int nd_{1};
   std::vector<int> source_;
+  std::vector<int> bucket_start_;
+  std::vector<int> bucket_;
   std::vector<double> distance_;
 };
 
@@ -302,15 +343,19 @@ inline SmoothPlan planSmoothAvoidance(
   }
 
   // Small extra margin so scan noise on the obstacle edge does not re-trigger detection
-  const double required = params.robot_radius + params.clearance + 0.1;
+  const double required = params.robot_radius + params.clearance + smooth.edge_margin;
   const double robot_s = frame.along(robot);
   const double robot_d = frame.lateral(robot);
   const double hold_min = -required;
   const double hold_max = required + smooth.hold_extra;
+  // A wide obstacle needs a large offset that a short ramp cannot reach within the turn limits:
+  // the longest ramp grows with the offset the narrower side needs
+  const double ramp_max = std::max(
+    smooth.ramp_max, smooth.ramp_per_offset * (required + std::min(left_d, -right_d)));
 
   const double cap = smooth.distance_cap;
   const double s_lo = robot_s - cap - 0.5;
-  const double s_hi = std::min(segment_length, last_s + hold_max + smooth.ramp_max) + 2.0 + cap;
+  const double s_hi = std::min(segment_length, last_s + hold_max + ramp_max) + 2.0 + cap;
   const double d_extent = std::max(
     std::abs(robot_d), std::max(std::abs(left_d), std::abs(right_d)) + params.max_lateral) + cap + 0.5;
   const smooth_detail::DistanceGrid obstacle_grid(
@@ -319,6 +364,8 @@ inline SmoothPlan planSmoothAvoidance(
     frame, s_lo, s_hi, -d_extent, d_extent, smooth.grid_resolution, cap, other_points);
 
   const double sample_step = smooth.grid_resolution;
+  // Grid distances within this of a hard limit are recomputed exactly
+  const double exact_band = 2.0 * smooth.grid_resolution;
   // Clearance cost and hard checks along one straight leg the LOS tracker follows
   auto check_leg = [&](const Point & a, const Point & b, double & clearance_cost) {
       const double length = distance(a, b);
@@ -330,8 +377,8 @@ inline SmoothPlan planSmoothAvoidance(
         if (frame.along(p) > s_hi - cap) {
           break;
         }
-        const double to_obstacle = obstacle_grid.clearance(p);
-        const double to_other = other_grid.clearance(p);
+        const double to_obstacle = obstacle_grid.clearance(p, required + exact_band);
+        const double to_other = other_grid.clearance(p, params.robot_radius + params.wall_margin + exact_band);
         if (to_obstacle < required || to_other < params.robot_radius + params.wall_margin) {
           return false;
         }
@@ -401,6 +448,7 @@ inline SmoothPlan planSmoothAvoidance(
 
       // Dense curve: curvature cost, and waypoints every waypoint_spacing of arc length
       double curvature_integral = 0.0;
+      double deviation_integral = 0.0;
       double max_curvature = 0.0;
       double arc = 0.0;
       double next_mark = smooth.waypoint_spacing;
@@ -418,6 +466,7 @@ inline SmoothPlan planSmoothAvoidance(
         const double ds = distance(previous, p);
         const double kappa = std::abs(d2) / std::pow(1.0 + d1 * d1, 1.5);
         curvature_integral += kappa * kappa * ds;
+        deviation_integral += std::abs(d) * ds;
         max_curvature = std::max(max_curvature, kappa);
         arc += ds;
         previous = p;
@@ -488,6 +537,7 @@ inline SmoothPlan planSmoothAvoidance(
       e.cost = smooth.w_curvature * curvature_integral +
         smooth.w_peak_curvature * max_curvature * max_curvature +
         smooth.w_clearance * clearance_cost + smooth.w_length * extra_length +
+        smooth.w_deviation * deviation_integral +
         smooth.w_turn * turn_cost +
         (preferred_side != 0 && c.side != preferred_side ? smooth.w_side_switch : 0.0);
       e.route = std::move(route);
@@ -502,8 +552,8 @@ inline SmoothPlan planSmoothAvoidance(
   auto clip = [&](Candidate c) {
       c.offset = std::max(required, std::min(c.offset, offset_max));
       c.hold = std::max(hold_min, std::min(c.hold, hold_max));
-      c.ramp_in = std::max(smooth.ramp_min, std::min(c.ramp_in, smooth.ramp_max));
-      c.ramp_out = std::max(smooth.ramp_min, std::min(c.ramp_out, smooth.ramp_max));
+      c.ramp_in = std::max(smooth.ramp_min, std::min(c.ramp_in, ramp_max));
+      c.ramp_out = std::max(smooth.ramp_min, std::min(c.ramp_out, ramp_max));
       return c;
     };
 
@@ -513,18 +563,44 @@ inline SmoothPlan planSmoothAvoidance(
     Evaluation evaluation;
   };
   std::array<std::vector<Scored>, 2> scored;  // [0] right (-1), [1] left (+1)
+  // Both sides use the same random draws, so a symmetric obstacle gives both sides the same cost
+  // and the side-switch cost decides, not sampling noise
   std::uniform_real_distribution<double> unit(0.0, 1.0);
+  std::vector<Candidate> draws(static_cast<std::size_t>(smooth.samples));
+  for (auto & c : draws) {
+    // Favour small offsets: the square pulls most samples towards the required clearance
+    const double u = unit(random);
+    c.offset = required + u * u * (offset_max - required);
+    c.hold = hold_min + unit(random) * (hold_max - hold_min);
+    c.ramp_in = smooth.ramp_min + unit(random) * (ramp_max - smooth.ramp_min);
+    c.ramp_out = smooth.ramp_min + unit(random) * (ramp_max - smooth.ramp_min);
+  }
+  // The tight detours sit in a narrow valid band just above the required offset that random draws
+  // often miss: a fixed lattice of them is always evaluated too
+  const double ramp_mid = 0.5 * (smooth.ramp_min + ramp_max);
+  for (const double extra : {0.0, 0.05, 0.1, 0.2}) {
+    for (const double hold : {-0.3, 0.0, 0.3}) {
+      for (const double ramp : {ramp_mid, ramp_max}) {
+        Candidate c;
+        c.offset = std::min(required + extra, offset_max);
+        c.hold = std::max(hold_min, std::min(hold, hold_max));
+        c.ramp_in = ramp;
+        c.ramp_out = ramp;
+        draws.push_back(c);
+      }
+    }
+  }
+  std::normal_distribution<double> normal(0.0, 1.0);
+  std::vector<std::array<double, 4>> noise(static_cast<std::size_t>(smooth.refine_samples));
+  for (auto & n : noise) {
+    for (auto & v : n) {
+      v = normal(random);
+    }
+  }
   for (const int side : {-1, 1}) {
     auto & bucket = scored[side > 0 ? 1 : 0];
-    for (int i = 0; i < smooth.samples; ++i) {
-      Candidate c;
+    for (Candidate c : draws) {
       c.side = side;
-      // Favour small offsets: the square pulls most samples towards the required clearance
-      const double u = unit(random);
-      c.offset = required + u * u * (offset_max - required);
-      c.hold = hold_min + unit(random) * (hold_max - hold_min);
-      c.ramp_in = smooth.ramp_min + unit(random) * (smooth.ramp_max - smooth.ramp_min);
-      c.ramp_out = smooth.ramp_min + unit(random) * (smooth.ramp_max - smooth.ramp_min);
       Evaluation e = evaluate(c);
       if (e.valid) {
         bucket.push_back({c, std::move(e)});
@@ -536,7 +612,6 @@ inline SmoothPlan planSmoothAvoidance(
   // is not dropped because its first random draw was unlucky. The MPPI-style weighted mean is
   // taken within one side only: averaging a left and a right detour would drive straight through
   // the obstacle.
-  std::normal_distribution<double> normal(0.0, 1.0);
   auto refine_side = [&](std::vector<Scored> & bucket, int side) {
       Evaluation chosen;
       if (bucket.empty()) {
@@ -584,12 +659,12 @@ inline SmoothPlan planSmoothAvoidance(
       Candidate mean;
       Candidate spread;
       weighted_mean(mean, spread);
-      for (int i = 0; i < smooth.refine_samples; ++i) {
+      for (const auto & n : noise) {
         Candidate c = mean;
-        c.offset += spread.offset * normal(random);
-        c.hold += spread.hold * normal(random);
-        c.ramp_in += spread.ramp_in * normal(random);
-        c.ramp_out += spread.ramp_out * normal(random);
+        c.offset += spread.offset * n[0];
+        c.hold += spread.hold * n[1];
+        c.ramp_in += spread.ramp_in * n[2];
+        c.ramp_out += spread.ramp_out * n[3];
         c = clip(c);
         Evaluation e = evaluate(c);
         if (e.valid) {

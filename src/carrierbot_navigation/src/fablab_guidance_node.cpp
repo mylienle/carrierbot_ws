@@ -178,12 +178,19 @@ public:
     smooth_params_.waypoint_spacing = declare_parameter<double>("smooth_waypoint_spacing", 1.0);
     smooth_params_.max_turn = declare_parameter<double>("smooth_max_turn", 0.35);
     smooth_params_.hard_turn = declare_parameter<double>("smooth_hard_turn", 0.7);
-    smooth_params_.ramp_min = declare_parameter<double>("smooth_ramp_min", 1.5);
-    smooth_params_.ramp_max = declare_parameter<double>("smooth_ramp_max", 4.0);
+    smooth_params_.ramp_min = declare_parameter<double>("smooth_ramp_min", 1.0);
+    smooth_params_.ramp_max = declare_parameter<double>("smooth_ramp_max", 2.5);
+    // Wide obstacles: the longest ramp is at least this times the offset the narrower side needs
+    smooth_params_.ramp_per_offset = declare_parameter<double>("smooth_ramp_per_offset", 2.0);
     smooth_params_.w_curvature = declare_parameter<double>("smooth_w_curvature", 4.0);
     smooth_params_.w_peak_curvature = declare_parameter<double>("smooth_w_peak_curvature", 2.0);
     smooth_params_.w_clearance = declare_parameter<double>("smooth_w_clearance", 2.0);
     smooth_params_.w_length = declare_parameter<double>("smooth_w_length", 1.0);
+    // Penalises time spent off the path, so the detour rejoins soon after the obstacle instead of
+    // on the longest, gentlest ramp
+    smooth_params_.w_deviation = declare_parameter<double>("smooth_w_deviation", 2.0);
+    smooth_params_.hold_extra = declare_parameter<double>("smooth_hold_extra", 0.5);
+    smooth_params_.edge_margin = declare_parameter<double>("smooth_edge_margin", 0.1);
     smooth_params_.w_turn = declare_parameter<double>("smooth_w_turn", 20.0);
     smooth_params_.w_side_switch = declare_parameter<double>("smooth_w_side_switch", 1.0);
     // The LiDAR sees only the near faces: the obstacle is assumed this deep behind them. A longer
@@ -200,7 +207,10 @@ public:
       smooth_params_.waypoint_spacing <= goal_radius_ ||
       smooth_params_.max_turn <= 0.0 || smooth_params_.hard_turn < smooth_params_.max_turn ||
       smooth_params_.ramp_min <= 0.0 || smooth_params_.ramp_max < smooth_params_.ramp_min ||
-      smooth_params_.shadow_depth < 0.0 || smooth_lateral_accel_ <= 0.0)
+      smooth_params_.shadow_depth < 0.0 || smooth_params_.w_deviation < 0.0 ||
+      smooth_params_.ramp_per_offset < 0.0 || smooth_params_.hold_extra < 0.0 ||
+      smooth_params_.edge_margin < 0.0 ||
+      smooth_lateral_accel_ <= 0.0)
     {
       throw std::runtime_error("Invalid smooth avoidance parameters");
     }
