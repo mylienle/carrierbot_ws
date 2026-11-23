@@ -1,5 +1,5 @@
-// Reactive LiDAR obstacle avoidance of the paper (Section V, Eq. 16-22), kept free of ROS
-// so the geometry can be unit tested on its own.
+// Reactive LiDAR obstacle detection and braking of the paper (Section V, Eq. 16-20), kept free
+// of ROS so it can be unit tested on its own. The detour itself is planned in smooth_avoidance.hpp.
 #pragma once
 
 #include <algorithm>
@@ -21,7 +21,6 @@ struct Params
   double robot_radius{0.52};     // r_robot
   double clearance{0.1};         // c_clear
   double avoid_distance{2.5};    // d_avoid, Eq. 19
-  double rejoin_distance{1.5};   // D_r, Eq. 21
   double stop_min_clearance{0.3};  // s_min, Eq. 20
   double actuator_delay{0.17};   // T_delay, Eq. 20
   double brake_decel{0.6};       // a_brake, Eq. 20
@@ -29,7 +28,7 @@ struct Params
   // beside the static object near WI on B1, so the robot braked instead of avoiding.
   double wall_margin{0.08};
   double cluster_gap{0.15};      // neighbouring scan points closer than this belong to one obstacle
-  double max_lateral{2.5};       // largest d_perp tried before the plan is rejected
+  double max_lateral{2.5};       // largest lateral offset of a detour from the obstacle centre
   double switch_radius{0.5};     // the guidance switches segment this far before a waypoint
 };
 
@@ -45,19 +44,6 @@ struct Obstacle
 inline double distance(const Point & a, const Point & b)
 {
   return std::hypot(a.x - b.x, a.y - b.y);
-}
-
-// min over lambda in [0,1] of |(1-lambda) q1 + lambda q2 - p|, Eq. 22
-inline double segmentDistance(const Point & p, const Point & q1, const Point & q2)
-{
-  const double dx = q2.x - q1.x;
-  const double dy = q2.y - q1.y;
-  const double length_sq = dx * dx + dy * dy;
-  double lambda = 0.0;
-  if (length_sq > 1e-12) {
-    lambda = std::max(0.0, std::min(((p.x - q1.x) * dx + (p.y - q1.y) * dy) / length_sq, 1.0));
-  }
-  return std::hypot(q1.x + lambda * dx - p.x, q1.y + lambda * dy - p.y);
 }
 
 // d_brake = r_robot + s_min + v T_delay + v^2 / (2 a_brake), Eq. 20
@@ -153,105 +139,6 @@ inline Obstacle detectObstacle(
     }
   }
   return obstacle;
-}
-
-// Waypoints R (robot), A1, A2 and, when it falls before the goal, B of Eq. 21. Every transition
-// segment must stay R_safe (Eq. 18) away from the obstacle centre (Eq. 22) and keep the robot
-// body clear of all other scan points. The preferred side sigma is tried first, then the other
-// one; an empty result means the pair is rejected and the robot has to stop instead.
-inline std::vector<Point> planAvoidance(
-  const Obstacle & obstacle, const std::vector<Point> & points,
-  const Point & robot, const Point & start, const Point & goal, int preferred_side,
-  const Params & params)
-{
-  const double segment_length = distance(start, goal);
-  if (!obstacle.found || segment_length < 1e-6) {
-    return {};
-  }
-  const double ux = (goal.x - start.x) / segment_length;
-  const double uy = (goal.y - start.y) / segment_length;
-  const double r_safe = obstacle.radius + params.robot_radius + params.clearance;
-  // Small extra margin so scan noise on the circle edge does not re-trigger detection
-  const double required = r_safe + 0.1;
-
-  // B is placed on the original path, D_r past the projection of the obstacle centre
-  const double center_s = (obstacle.center.x - start.x) * ux + (obstacle.center.y - start.y) * uy;
-  const bool use_b = center_s + params.rejoin_distance < segment_length;
-  const Point b{start.x + (center_s + params.rejoin_distance) * ux,
-    start.y + (center_s + params.rejoin_distance) * uy};
-
-  auto clear = [&](const Point & q1, const Point & q2) {
-      if (segmentDistance(obstacle.center, q1, q2) < required) {
-        return false;
-      }
-      for (std::size_t i = 0; i < points.size(); ++i) {
-        if (i < obstacle.member.size() && obstacle.member[i]) {
-          continue;
-        }
-        if (segmentDistance(points[i], q1, q2) < params.robot_radius + params.wall_margin) {
-          return false;
-        }
-      }
-      return true;
-    };
-
-  // The robot leaves for the next segment switch_radius before a waypoint, so it cuts the
-  // corner: the chord between the points switch_radius before and after the corner is checked too.
-  auto clear_corner = [&](const Point & p, const Point & corner, const Point & q) {
-      const double in = distance(p, corner);
-      const double out = distance(corner, q);
-      if (in < 1e-6 || out < 1e-6) {
-        return true;
-      }
-      const double r_in = std::min(params.switch_radius, in);
-      const double r_out = std::min(params.switch_radius, out);
-      const Point leave{corner.x + (p.x - corner.x) * r_in / in, corner.y + (p.y - corner.y) * r_in / in};
-      const Point enter{corner.x + (q.x - corner.x) * r_out / out,
-        corner.y + (q.y - corner.y) * r_out / out};
-      return clear(leave, enter);
-    };
-
-  // A single A abeam the obstacle makes both diagonal legs cut the R_safe circle, which pushed
-  // d_perp ~0.3 m past R_safe. A1 and A2 sit half_length before and after the obstacle at the
-  // same d_perp, so the robot passes it on a leg parallel to the path; half_length 0 is the
-  // single A of Eq. 21. The smallest d_perp wins, then the shortest parallel leg.
-  const double robot_s = (robot.x - start.x) * ux + (robot.y - start.y) * uy;
-  const int sides[2] = {preferred_side >= 0 ? 1 : -1, preferred_side >= 0 ? -1 : 1};
-  for (const int sigma : sides) {
-    for (double lateral = required; lateral <= params.max_lateral + 1e-9; lateral += 0.05) {
-      for (double half_length = 0.0; half_length <= r_safe + 1.0 + 1e-9; half_length += 0.1) {
-        // A1 must stay ahead of the robot and A2 before B
-        if (center_s - half_length <= robot_s ||
-          (use_b && half_length >= params.rejoin_distance - params.switch_radius))
-        {
-          break;
-        }
-        // A = c_o + sigma d_perp (-sin pi_p, cos pi_p) +- half_length (cos pi_p, sin pi_p), Eq. 21
-        std::vector<Point> route{robot};
-        for (const double along : {-half_length, half_length}) {
-          route.push_back({obstacle.center.x + along * ux - sigma * lateral * uy,
-              obstacle.center.y + along * uy + sigma * lateral * ux});
-          if (half_length < 1e-9) {
-            break;
-          }
-        }
-        if (use_b) {
-          route.push_back(b);
-        }
-        route.push_back(goal);
-        bool valid = true;
-        for (std::size_t i = 0; valid && i + 1 < route.size(); ++i) {
-          valid = clear(route[i], route[i + 1]) &&
-            (i == 0 || clear_corner(route[i - 1], route[i], route[i + 1]));
-        }
-        if (valid) {
-          route.pop_back();
-          return route;
-        }
-      }
-    }
-  }
-  return {};
 }
 
 }  // namespace fablab_avoidance

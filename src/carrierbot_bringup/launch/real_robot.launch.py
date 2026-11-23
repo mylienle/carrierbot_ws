@@ -75,9 +75,6 @@ def generate_launch_description():
         "delta_max", default_value="0.8", description="LOS look-ahead maximum (m)")
     kd_arg = DeclareLaunchArgument(
         "KD", default_value="0.7", description="Heading D gain")
-    avoid_planner_arg = DeclareLaunchArgument(
-        "avoid_planner", default_value="geometric",
-        description="fablab_los_pd detour planner: geometric (A1-A2 pair) or smooth (sampled curve)")
 
     channel_type_arg = DeclareLaunchArgument(
             'channel_type',
@@ -238,7 +235,6 @@ def generate_launch_description():
             "delta_min": ParameterValue(LaunchConfiguration("delta_min"), value_type=float),
             "delta_max": ParameterValue(LaunchConfiguration("delta_max"), value_type=float),
             "KD": ParameterValue(LaunchConfiguration("KD"), value_type=float),
-            "avoid_planner": ParameterValue(LaunchConfiguration("avoid_planner"), value_type=str),
         }],
         condition=IfCondition(PythonExpression([
             "'", use_amcl, "' == 'true' and '", guidance_mode, "' == 'fablab_los_pd'"
@@ -311,7 +307,6 @@ def generate_launch_description():
         delta_min_arg,
         delta_max_arg,
         kd_arg,
-        avoid_planner_arg,
         channel_type_arg,
         serial_port_arg,
         lidar_port_log,

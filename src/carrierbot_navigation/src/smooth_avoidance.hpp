@@ -1,7 +1,8 @@
-// Smooth sampling-based detour planner, an alternative to planAvoidance (obstacle_avoidance.hpp).
-// Candidates are smooth lateral-offset curves around the obstacle, scored by a cost that weighs
-// curvature first, then clearance and extra length; the winning side is refined with the
-// MPPI-style exponentially weighted average of its candidates. The curve is handed to the
+// Smooth sampling-based detour planner of the fablab guidance (obstacle_avoidance.hpp detects the
+// obstacle). Candidates are smooth lateral-offset curves around the obstacle, scored by a cost that
+// weighs curvature first, then clearance and extra length; each side is refined with the
+// MPPI-style exponentially weighted average of its candidates and the cheaper refined side wins.
+// The curve is handed to the
 // unchanged LOS + PD tracker as a few evenly spaced waypoints. Kept free of ROS so it can be
 // unit tested on its own.
 #pragma once
@@ -225,7 +226,7 @@ inline SmoothPlan planSmoothAvoidance(
   frame.length = segment_length;
 
   const double r_safe = obstacle.radius + params.robot_radius + params.clearance;
-  // Same extra margin as planAvoidance, so scan noise on the circle edge does not re-trigger
+  // Small extra margin so scan noise on the circle edge does not re-trigger detection
   const double required = r_safe + 0.1;
   const double robot_s = frame.along(robot);
   const double robot_d = frame.lateral(robot);
@@ -450,95 +451,103 @@ inline SmoothPlan planSmoothAvoidance(
     }
   }
 
-  // Winning side: lowest cost among its candidates
-  int best_side = 0;
-  double best_cost = std::numeric_limits<double>::infinity();
-  for (int k = 0; k < 2; ++k) {
-    for (const auto & s : scored[k]) {
-      if (s.evaluation.cost < best_cost) {
-        best_cost = s.evaluation.cost;
-        best_side = k == 1 ? 1 : -1;
+  // Each side is refined on its own and the sides are compared on their refined paths, so a side
+  // is not dropped because its first random draw was unlucky. The MPPI-style weighted mean is
+  // taken within one side only: averaging a left and a right detour would drive straight through
+  // the obstacle.
+  std::normal_distribution<double> normal(0.0, 1.0);
+  auto refine_side = [&](std::vector<Scored> & bucket, int side) {
+      Evaluation chosen;
+      if (bucket.empty()) {
+        return chosen;
       }
-    }
-  }
-  if (best_side == 0) {
-    return plan;
-  }
-  auto & bucket = scored[best_side > 0 ? 1 : 0];
+      auto weighted_mean = [&](Candidate & mean, Candidate & spread) {
+          double minimum = std::numeric_limits<double>::infinity();
+          for (const auto & s : bucket) {
+            minimum = std::min(minimum, s.evaluation.cost);
+          }
+          double total = 0.0;
+          mean = Candidate{};
+          mean.side = side;
+          mean.offset = mean.hold = mean.ramp_in = mean.ramp_out = 0.0;
+          std::vector<double> weights;
+          for (const auto & s : bucket) {
+            const double w = std::exp(-(s.evaluation.cost - minimum) / smooth.temperature);
+            weights.push_back(w);
+            total += w;
+            mean.offset += w * s.candidate.offset;
+            mean.hold += w * s.candidate.hold;
+            mean.ramp_in += w * s.candidate.ramp_in;
+            mean.ramp_out += w * s.candidate.ramp_out;
+          }
+          mean.offset /= total;
+          mean.hold /= total;
+          mean.ramp_in /= total;
+          mean.ramp_out /= total;
+          spread = Candidate{};
+          spread.offset = spread.hold = spread.ramp_in = spread.ramp_out = 0.0;
+          for (std::size_t i = 0; i < bucket.size(); ++i) {
+            const auto & c = bucket[i].candidate;
+            const double w = weights[i] / total;
+            spread.offset += w * std::pow(c.offset - mean.offset, 2);
+            spread.hold += w * std::pow(c.hold - mean.hold, 2);
+            spread.ramp_in += w * std::pow(c.ramp_in - mean.ramp_in, 2);
+            spread.ramp_out += w * std::pow(c.ramp_out - mean.ramp_out, 2);
+          }
+          spread.offset = std::max(0.05, std::sqrt(spread.offset));
+          spread.hold = std::max(0.05, std::sqrt(spread.hold));
+          spread.ramp_in = std::max(0.1, std::sqrt(spread.ramp_in));
+          spread.ramp_out = std::max(0.1, std::sqrt(spread.ramp_out));
+        };
 
-  // MPPI-style weighted mean (and spread) of the parameters on the winning side only:
-  // averaging a left and a right detour would drive straight through the obstacle
-  auto weighted_mean = [&](Candidate & mean, Candidate & spread) {
-      double minimum = std::numeric_limits<double>::infinity();
+      Candidate mean;
+      Candidate spread;
+      weighted_mean(mean, spread);
+      for (int i = 0; i < smooth.refine_samples; ++i) {
+        Candidate c = mean;
+        c.offset += spread.offset * normal(random);
+        c.hold += spread.hold * normal(random);
+        c.ramp_in += spread.ramp_in * normal(random);
+        c.ramp_out += spread.ramp_out * normal(random);
+        c = clip(c);
+        Evaluation e = evaluate(c);
+        if (e.valid) {
+          bucket.push_back({c, std::move(e)});
+        }
+      }
+      weighted_mean(mean, spread);
+
+      // The weighted mean is used when it is valid and not clearly worse than the best sample
+      const Scored * best = &bucket.front();
       for (const auto & s : bucket) {
-        minimum = std::min(minimum, s.evaluation.cost);
+        if (s.evaluation.cost < best->evaluation.cost) {
+          best = &s;
+        }
       }
-      double total = 0.0;
-      mean = Candidate{};
-      mean.side = best_side;
-      mean.offset = mean.hold = mean.ramp_in = mean.ramp_out = 0.0;
-      std::vector<double> weights;
-      for (const auto & s : bucket) {
-        const double w = std::exp(-(s.evaluation.cost - minimum) / smooth.temperature);
-        weights.push_back(w);
-        total += w;
-        mean.offset += w * s.candidate.offset;
-        mean.hold += w * s.candidate.hold;
-        mean.ramp_in += w * s.candidate.ramp_in;
-        mean.ramp_out += w * s.candidate.ramp_out;
+      chosen = evaluate(clip(mean));
+      if (!chosen.valid || chosen.cost > best->evaluation.cost + smooth.temperature) {
+        chosen = best->evaluation;
       }
-      mean.offset /= total;
-      mean.hold /= total;
-      mean.ramp_in /= total;
-      mean.ramp_out /= total;
-      spread = Candidate{};
-      spread.offset = spread.hold = spread.ramp_in = spread.ramp_out = 0.0;
-      for (std::size_t i = 0; i < bucket.size(); ++i) {
-        const auto & c = bucket[i].candidate;
-        const double w = weights[i] / total;
-        spread.offset += w * std::pow(c.offset - mean.offset, 2);
-        spread.hold += w * std::pow(c.hold - mean.hold, 2);
-        spread.ramp_in += w * std::pow(c.ramp_in - mean.ramp_in, 2);
-        spread.ramp_out += w * std::pow(c.ramp_out - mean.ramp_out, 2);
-      }
-      spread.offset = std::max(0.05, std::sqrt(spread.offset));
-      spread.hold = std::max(0.05, std::sqrt(spread.hold));
-      spread.ramp_in = std::max(0.1, std::sqrt(spread.ramp_in));
-      spread.ramp_out = std::max(0.1, std::sqrt(spread.ramp_out));
+      return chosen;
     };
 
-  Candidate mean;
-  Candidate spread;
-  weighted_mean(mean, spread);
-  std::normal_distribution<double> normal(0.0, 1.0);
-  for (int i = 0; i < smooth.refine_samples; ++i) {
-    Candidate c = mean;
-    c.offset += spread.offset * normal(random);
-    c.hold += spread.hold * normal(random);
-    c.ramp_in += spread.ramp_in * normal(random);
-    c.ramp_out += spread.ramp_out * normal(random);
-    c = clip(c);
-    Evaluation e = evaluate(c);
-    if (e.valid) {
-      bucket.push_back({c, std::move(e)});
-    }
+  const Evaluation right = refine_side(scored[0], -1);
+  const Evaluation left = refine_side(scored[1], 1);
+  if (!right.valid && !left.valid) {
+    return plan;
   }
-  weighted_mean(mean, spread);
-
-  // The weighted mean is used when it is valid and not clearly worse than the best sample
-  const Scored * best = &bucket.front();
-  for (const auto & s : bucket) {
-    if (s.evaluation.cost < best->evaluation.cost) {
-      best = &s;
-    }
+  // Exact ties go to the preferred side (the side-switch cost already separates most cases)
+  bool take_left;
+  if (right.valid != left.valid) {
+    take_left = left.valid;
+  } else if (left.cost != right.cost) {
+    take_left = left.cost < right.cost;
+  } else {
+    take_left = preferred_side > 0;
   }
-  Evaluation chosen = evaluate(clip(mean));
-  if (!chosen.valid || chosen.cost > best->evaluation.cost + smooth.temperature) {
-    chosen = best->evaluation;
-  }
-
-  plan.route = std::move(chosen.route);
-  plan.side = best_side;
+  const Evaluation & chosen = take_left ? left : right;
+  plan.route = chosen.route;
+  plan.side = take_left ? 1 : -1;
   plan.cost = chosen.cost;
   plan.max_curvature = chosen.max_curvature;
   plan.valid_candidates = static_cast<int>(scored[0].size() + scored[1].size());
