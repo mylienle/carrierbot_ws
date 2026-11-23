@@ -20,6 +20,7 @@
 #include "obstacle_avoidance.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "sensor_msgs/msg/laser_scan.hpp"
+#include "smooth_avoidance.hpp"
 #include "std_msgs/msg/bool.hpp"
 #include "std_msgs/msg/int32.hpp"
 #include "tf2_ros/buffer.h"
@@ -168,6 +169,44 @@ public:
     map_ignore_radius_ = declare_parameter<double>("map_ignore_radius", 0.15);
     map_topic_ = declare_parameter<std::string>("map_topic", "/map");
     guidance_log_path_ = declare_parameter<std::string>("guidance_log_path", guidanceLogPath());
+    // Detour planner: "geometric" = the paper's R-A1-A2-B pair, "smooth" = sampled smooth curve
+    // (smooth_avoidance.hpp) resampled into waypoints. LOS + PD tracks either one unchanged.
+    avoid_planner_ = declare_parameter<std::string>("avoid_planner", "geometric");
+    smooth_fallback_geometric_ = declare_parameter<bool>("smooth_fallback_geometric", true);
+    smooth_params_.samples = static_cast<int>(declare_parameter<int64_t>("smooth_samples", 48));
+    smooth_params_.refine_samples =
+      static_cast<int>(declare_parameter<int64_t>("smooth_refine_samples", 24));
+    smooth_params_.temperature = declare_parameter<double>("smooth_temperature", 1.0);
+    smooth_params_.waypoint_spacing = declare_parameter<double>("smooth_waypoint_spacing", 1.0);
+    smooth_params_.max_turn = declare_parameter<double>("smooth_max_turn", 0.35);
+    smooth_params_.hard_turn = declare_parameter<double>("smooth_hard_turn", 0.7);
+    smooth_params_.ramp_min = declare_parameter<double>("smooth_ramp_min", 1.5);
+    smooth_params_.ramp_max = declare_parameter<double>("smooth_ramp_max", 4.0);
+    smooth_params_.w_curvature = declare_parameter<double>("smooth_w_curvature", 4.0);
+    smooth_params_.w_peak_curvature = declare_parameter<double>("smooth_w_peak_curvature", 2.0);
+    smooth_params_.w_clearance = declare_parameter<double>("smooth_w_clearance", 2.0);
+    smooth_params_.w_length = declare_parameter<double>("smooth_w_length", 1.0);
+    smooth_params_.w_turn = declare_parameter<double>("smooth_w_turn", 20.0);
+    smooth_params_.w_side_switch = declare_parameter<double>("smooth_w_side_switch", 1.0);
+    // Speed on a smooth detour: v = sqrt(a_lat * leg / turn) at the next detour waypoint, so the
+    // robot keeps a steady speed through gentle bends instead of dropping to min_speed_linear at
+    // every inserted point (m/s^2)
+    smooth_lateral_accel_ = declare_parameter<double>("smooth_lateral_accel", 0.2);
+
+    if (avoid_planner_ != "geometric" && avoid_planner_ != "smooth") {
+      throw std::runtime_error("avoid_planner must be \"geometric\" or \"smooth\"");
+    }
+    if (
+      smooth_params_.samples < 2 || smooth_params_.refine_samples < 0 ||
+      smooth_params_.temperature <= 0.0 ||
+      smooth_params_.waypoint_spacing <= goal_radius_ ||
+      smooth_params_.max_turn <= 0.0 || smooth_params_.hard_turn < smooth_params_.max_turn ||
+      smooth_params_.ramp_min <= 0.0 || smooth_params_.ramp_max < smooth_params_.ramp_min ||
+      smooth_lateral_accel_ <= 0.0)
+    {
+      throw std::runtime_error("Invalid smooth avoidance parameters");
+    }
+    last_avoid_side_ = avoid_side_;
 
     if (
       cycle_seconds_ <= 0.0 || goal_radius_ <= 0.0 ||
@@ -224,7 +263,8 @@ public:
         "time_s,segment,amcl_x,amcl_y,amcl_yaw,start_x,start_y,goal_x,goal_y,"
         "cross_track,long_track,lookahead,target_heading,heading_error,remaining_distance,"
         "linear_cmd,angular_cmd,safety_stop,finished,"
-        "avoid_state,obstacle_x,obstacle_y,obstacle_r,obstacle_distance,pose_hold,manual\n";
+        "avoid_state,obstacle_x,obstacle_y,obstacle_r,obstacle_distance,pose_hold,manual,"
+        "avoid_planner,avoid_side\n";
       RCLCPP_INFO(get_logger(), "Guidance CSV: %s", guidance_log_path_.c_str());
     } else {
       RCLCPP_WARN(get_logger(), "Cannot open guidance CSV: %s", guidance_log_path_.c_str());
@@ -232,8 +272,9 @@ public:
 
     RCLCPP_INFO(
       get_logger(),
-      "Fablab LOS-PD mode ready: direct waypoint tracking, goal_radius=%.2f m, cycle=%.2f s",
-      goal_radius_, cycle_seconds_);
+      "Fablab LOS-PD mode ready: direct waypoint tracking, goal_radius=%.2f m, cycle=%.2f s, "
+      "avoid_planner=%s",
+      goal_radius_, cycle_seconds_, avoid_planner_.c_str());
   }
 
 private:
@@ -461,6 +502,8 @@ private:
     avoid_latched_ = false;
     avoid_release_count_ = 0;
     obstacle_ = fablab_avoidance::Obstacle();
+    smooth_detour_ = false;
+    detour_side_ = 0;
   }
 
   // Detection, decision and stopping monitor of the paper (Eq. 19, 20). On a valid plan the
@@ -540,8 +583,39 @@ private:
     // legs are also checked against the occupied cells of the static map around the robot
     std::vector<fablab_avoidance::Point> points = scan_points_;
     appendMapWalls(robot, points);
-    const auto inserted = fablab_avoidance::planAvoidance(
-      obstacle_, points, robot, start, goal, avoid_side_, avoid_params_);
+    std::vector<fablab_avoidance::Point> inserted;
+    bool smooth = false;
+    int side = 0;
+    double max_curvature = 0.0;
+    int valid_candidates = 0;
+    if (avoid_planner_ == "smooth") {
+      const auto plan_start = std::chrono::steady_clock::now();
+      const auto plan = fablab_avoidance::planSmoothAvoidance(
+        obstacle_, points, robot, start, goal, last_avoid_side_, avoid_params_, smooth_params_);
+      const double plan_ms = std::chrono::duration<double, std::milli>(
+        std::chrono::steady_clock::now() - plan_start).count();
+      valid_candidates = plan.valid_candidates;
+      if (!plan.route.empty()) {
+        inserted = plan.route;
+        smooth = true;
+        side = plan.side;
+        max_curvature = plan.max_curvature;
+        RCLCPP_INFO(
+          get_logger(), "Smooth detour: side=%+d cost=%.2f kmax=%.2f 1/m valid=%d points=%zu %.1f ms",
+          side, plan.cost, max_curvature, valid_candidates, inserted.size() - 1, plan_ms);
+      } else if (smooth_fallback_geometric_) {
+        inserted = fablab_avoidance::planAvoidance(
+          obstacle_, points, robot, start, goal, last_avoid_side_, avoid_params_);
+        if (!inserted.empty()) {
+          RCLCPP_WARN(
+            get_logger(), "Smooth detour found no valid curve (%.1f ms), using the geometric pair",
+            plan_ms);
+        }
+      }
+    } else {
+      inserted = fablab_avoidance::planAvoidance(
+        obstacle_, points, robot, start, goal, avoid_side_, avoid_params_);
+    }
     if (inserted.empty()) {
       // No pair fits from here (e.g. the robot is still inside a narrow passage). The obstacle is
       // beyond d_brake, so keep following the original path and plan again next cycle; the
@@ -557,6 +631,15 @@ private:
     ++current_segment_;  // the active segment is now R -> A
     avoid_end_segment_ = current_segment_ + inserted.size();
     avoid_confirm_count_ = 0;
+    if (side == 0) {
+      // Geometric pair: the side is where A1 lies relative to the original segment
+      const double cross = (goal.x - start.x) * (inserted[1].y - start.y) -
+        (goal.y - start.y) * (inserted[1].x - start.x);
+      side = cross >= 0.0 ? 1 : -1;
+    }
+    smooth_detour_ = smooth;
+    detour_side_ = side;
+    last_avoid_side_ = side;
     RCLCPP_WARN(
       get_logger(), "Avoiding obstacle at (%.2f, %.2f) r=%.2f m, d=%.2f m via A=(%.2f, %.2f)",
       obstacle_.center.x, obstacle_.center.y, obstacle_.radius, obstacle_.surface_distance,
@@ -693,7 +776,22 @@ private:
       const auto & next = waypoints_[current_segment_ + 2];
       const double incoming = std::atan2(goal.second - current.second, goal.first - current.first);
       const double outgoing = std::atan2(next.second - goal.second, next.first - goal.first);
-      if (std::abs(normalizeAngle(outgoing - incoming)) >= corner_turn_threshold_) {
+      const double turn = std::abs(normalizeAngle(outgoing - incoming));
+      if (smooth_detour_ && current_segment_ + 1 < avoid_end_segment_) {
+        // Smooth detour point: one speed from the bend ahead (v^2 * turn / leg <= a_lat) instead of
+        // the corner slowdown and the heading-error speed of controlLos, which drop the robot to
+        // min_speed_linear at every inserted point. A large heading error still caps the speed.
+        const double leg = std::min(
+          std::hypot(goal.first - current.first, goal.second - current.second),
+          std::hypot(next.first - goal.first, next.second - goal.second));
+        const double bend_speed = turn > 1e-3 ?
+          std::sqrt(smooth_lateral_accel_ * leg / turn) : max_linear_speed_;
+        linear_x_ = clamp(
+          std::min(bend_speed, linear_speed_), min_linear_speed_, max_linear_speed_);
+        if (std::abs(heading_error_) >= turn_heading_threshold_) {
+          linear_x_ = std::min(linear_x_, turn_heading_max_speed_);
+        }
+      } else if (turn >= corner_turn_threshold_) {
         reach_radius += corner_advance_;
         if (remaining_distance_ <= corner_slowdown_distance_) {
           linear_x_ = std::min(linear_x_, corner_max_speed_);
@@ -959,7 +1057,9 @@ private:
                   << (obstacle_.found ? obstacle_.center.x : 0.0) << ','
                   << (obstacle_.found ? obstacle_.center.y : 0.0) << ','
                   << obstacle_.radius << ',' << obstacle_.surface_distance << ','
-                  << (pose_was_held_ ? 1 : 0) << ',' << (manual_active_ ? 1 : 0) << '\n';
+                  << (pose_was_held_ ? 1 : 0) << ',' << (manual_active_ ? 1 : 0) << ','
+                  << (current_segment_ + 1 < avoid_end_segment_ ? (smooth_detour_ ? 2 : 1) : 0)
+                  << ',' << (current_segment_ + 1 < avoid_end_segment_ ? detour_side_ : 0) << '\n';
     guidance_log_.flush();
   }
 
@@ -997,6 +1097,13 @@ private:
   double sense_distance_{5.0};
   double avoid_self_radius_{0.6};
   int avoid_side_{-1};
+  std::string avoid_planner_{"geometric"};
+  bool smooth_fallback_geometric_{true};
+  fablab_avoidance::SmoothParams smooth_params_;
+  double smooth_lateral_accel_{0.2};
+  bool smooth_detour_{false};   // the active detour came from the smooth planner
+  int detour_side_{0};          // side of the active detour, +1 left, -1 right
+  int last_avoid_side_{-1};     // side of the previous detour, preferred by the smooth planner
   int avoid_confirm_cycles_{3};
   int avoid_confirm_count_{0};
   bool avoid_latched_{false};
