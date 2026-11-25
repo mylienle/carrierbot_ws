@@ -35,7 +35,7 @@ struct SmoothParams
   double hold_extra{0.5};       // the full-offset leg spans at most the margin + this past the obstacle (m)
   double edge_margin{0.1};      // kept beyond r_robot + c_clear from the obstacle points (m)
   double shadow_depth{0.5};     // the unseen obstacle is assumed this deep behind its visible points (m)
-  double trigger_base{1.2};     // plan the detour at min(avoid_distance, base + per_offset * offset) (m)
+  double trigger_base{1.0};     // plan the detour at min(avoid_distance, base + per_offset * offset) (m)
   double trigger_per_offset{0.9};  // so a narrow obstacle is passed later than a wide one
   double clearance_decay{0.3};  // c0 of the clearance cost exp(-c / c0) (m)
   double w_curvature{4.0};      // integral of curvature^2 along the curve
