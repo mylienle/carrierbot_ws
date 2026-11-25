@@ -196,6 +196,10 @@ public:
     // The LiDAR sees only the near faces: the obstacle is assumed this deep behind them. A longer
     // obstacle shows up while the detour is followed, and the detour is then planned again (m)
     smooth_params_.shadow_depth = declare_parameter<double>("smooth_shadow_depth", 0.5);
+    // A first detour is planned at min(avoid_distance, base + per_offset * offset), offset being
+    // the lateral offset the narrower side needs: a narrow obstacle is passed later (m, m/m)
+    smooth_params_.trigger_base = declare_parameter<double>("smooth_trigger_base", 1.2);
+    smooth_params_.trigger_per_offset = declare_parameter<double>("smooth_trigger_per_offset", 0.9);
     // Speed on a smooth detour: v = sqrt(a_lat * leg / turn) at the next detour waypoint, so the
     // robot keeps a steady speed through gentle bends instead of dropping to min_speed_linear at
     // every inserted point (m/s^2)
@@ -210,6 +214,7 @@ public:
       smooth_params_.shadow_depth < 0.0 || smooth_params_.w_deviation < 0.0 ||
       smooth_params_.ramp_per_offset < 0.0 || smooth_params_.hold_extra < 0.0 ||
       smooth_params_.edge_margin < 0.0 ||
+      smooth_params_.trigger_base < 0.0 || smooth_params_.trigger_per_offset < 0.0 ||
       smooth_lateral_accel_ <= 0.0)
     {
       throw std::runtime_error("Invalid smooth avoidance parameters");
@@ -570,7 +575,10 @@ private:
       updateDetour(robot, is_ahead);
       return;
     }
-    if (!obstacle_.found || obstacle_.surface_distance >= avoid_params_.avoid_distance) {
+    if (!obstacle_.found || obstacle_.surface_distance >= avoid_params_.avoid_distance ||
+      obstacle_.surface_distance >= fablab_avoidance::detourTriggerDistance(
+        obstacle_, scan_points_, is_ahead, start, goal, avoid_params_, smooth_params_))
+    {
       avoid_confirm_count_ = 0;
       return;
     }

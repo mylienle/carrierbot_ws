@@ -35,6 +35,8 @@ struct SmoothParams
   double hold_extra{0.5};       // the full-offset leg spans at most the margin + this past the obstacle (m)
   double edge_margin{0.1};      // kept beyond r_robot + c_clear from the obstacle points (m)
   double shadow_depth{0.5};     // the unseen obstacle is assumed this deep behind its visible points (m)
+  double trigger_base{1.2};     // plan the detour at min(avoid_distance, base + per_offset * offset) (m)
+  double trigger_per_offset{0.9};  // so a narrow obstacle is passed later than a wide one
   double clearance_decay{0.3};  // c0 of the clearance cost exp(-c / c0) (m)
   double w_curvature{4.0};      // integral of curvature^2 along the curve
   double w_peak_curvature{2.0};  // peak curvature^2
@@ -282,6 +284,71 @@ inline std::size_t blockingPoint(
   return nearest;
 }
 
+namespace smooth_detail
+{
+// The cluster is grown in scan order, so a stray return behind a corner (a mixed pixel) can cut
+// a long obstacle short: also take every obstacle point within gap of the cluster in space
+inline std::vector<bool> spatialMembers(
+  const Obstacle & obstacle, const std::vector<Point> & points,
+  const std::vector<bool> & is_obstacle, double gap)
+{
+  std::vector<bool> members(points.size(), false);
+  std::vector<std::size_t> open;
+  for (std::size_t i = 0; i < points.size() && i < obstacle.member.size(); ++i) {
+    if (obstacle.member[i]) {
+      members[i] = true;
+      open.push_back(i);
+    }
+  }
+  while (!open.empty()) {
+    const Point p = points[open.back()];
+    open.pop_back();
+    for (std::size_t j = 0; j < points.size() && j < is_obstacle.size(); ++j) {
+      if (!members[j] && is_obstacle[j] && distance(p, points[j]) < gap) {
+        members[j] = true;
+        open.push_back(j);
+      }
+    }
+  }
+  return members;
+}
+}  // namespace smooth_detail
+
+// Distance to the obstacle at which the detour is planned. A detour starts at the robot, so this
+// sets how early the robot leaves the path. A narrow obstacle needs a small offset that a short
+// ramp reaches, so it is planned late; a wide one needs a large offset and is planned up to
+// avoid_distance ahead: min(avoid_distance, trigger_base + trigger_per_offset * offset), with
+// offset = r_robot + c_clear + edge_margin past the obstacle edge on its narrower side.
+inline double detourTriggerDistance(
+  const Obstacle & obstacle, const std::vector<Point> & points,
+  const std::vector<bool> & is_obstacle, const Point & start, const Point & goal,
+  const Params & params, const SmoothParams & smooth)
+{
+  const double segment_length = distance(start, goal);
+  if (!obstacle.found || segment_length < 1e-6) {
+    return params.avoid_distance;
+  }
+  const double ux = (goal.x - start.x) / segment_length;
+  const double uy = (goal.y - start.y) / segment_length;
+  const std::vector<bool> members =
+    smooth_detail::spatialMembers(obstacle, points, is_obstacle, params.cluster_gap);
+  double right_d = std::numeric_limits<double>::infinity();
+  double left_d = -right_d;
+  for (std::size_t i = 0; i < points.size(); ++i) {
+    if (members[i]) {
+      const double d = -(points[i].x - start.x) * uy + (points[i].y - start.y) * ux;
+      right_d = std::min(right_d, d);
+      left_d = std::max(left_d, d);
+    }
+  }
+  if (left_d < right_d) {
+    return params.avoid_distance;
+  }
+  const double offset =
+    params.robot_radius + params.clearance + smooth.edge_margin + std::min(left_d, -right_d);
+  return std::min(params.avoid_distance, smooth.trigger_base + smooth.trigger_per_offset * offset);
+}
+
 // Plans the detour for the obstacle that blocks start -> goal. points are all scan points and
 // static map walls near the robot (map frame); is_obstacle marks the new scan points ahead of the
 // robot. The obstacle is its cluster points as seen, extended by shadow_depth along the path
@@ -309,6 +376,9 @@ inline SmoothPlan planSmoothAvoidance(
   frame.uy = (goal.y - start.y) / segment_length;
   frame.length = segment_length;
 
+  const std::vector<bool> members =
+    smooth_detail::spatialMembers(obstacle, points, is_obstacle, params.cluster_gap);
+
   // Split the points: obstacle points (new, ahead, plus the shadow of the cluster) and the rest
   std::vector<Point> obstacle_points;
   std::vector<Point> other_points;
@@ -317,7 +387,7 @@ inline SmoothPlan planSmoothAvoidance(
   double right_d = first_s;
   double left_d = -first_s;
   for (std::size_t i = 0; i < points.size(); ++i) {
-    const bool member = i < obstacle.member.size() && obstacle.member[i];
+    const bool member = members[i];
     if (!is_obstacle[i] && !member) {
       other_points.push_back(points[i]);
       continue;
