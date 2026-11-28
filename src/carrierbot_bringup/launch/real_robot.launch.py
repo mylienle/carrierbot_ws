@@ -78,7 +78,7 @@ def generate_launch_description():
     # Smooth detour: a first detour is planned at min(avoid_distance, base + 0.9 * offset needed),
     # so a lower base leaves the path later (sharper turns); 99 plans every detour at avoid_distance
     smooth_trigger_base_arg = DeclareLaunchArgument(
-        "smooth_trigger_base", default_value="1.0",
+        "smooth_trigger_base", default_value="1.2",
         description="Detour trigger distance at zero offset (m)")
 
     channel_type_arg = DeclareLaunchArgument(
